@@ -1,0 +1,13 @@
+# Ignore local build/test/runtime artifacts
+*.log
+*.zip
+
+# Test artifacts
+tests/artifacts/
+
+# PowerShell transient cache/runtime paths
+cache/
+
+# OS/editor files
+Thumbs.db
+desktop.ini
