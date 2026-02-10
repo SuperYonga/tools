@@ -52,7 +52,7 @@ if (-not (Test-Path $installerPs1)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
-  $LogPath = Join-Path $scriptDir ("install-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+  $LogPath = Join-Path (Join-Path $scriptDir "logs") ("install-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
 }
 $script:LogPath = $LogPath
 

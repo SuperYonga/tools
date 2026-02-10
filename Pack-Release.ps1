@@ -1,5 +1,5 @@
 param(
-  [string]$OutputDir = $PSScriptRoot
+  [string]$OutputDir = (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "builds") "Install-Brother-MFCL9570CDW")
 )
 
 $ErrorActionPreference = "Stop"

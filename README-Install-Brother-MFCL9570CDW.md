@@ -56,19 +56,29 @@ INSTALL.bat -PrinterIP 192.168.0.120 -ValidateOnly
 ```
 
 ## Logging
-A log file is written on every run in the same folder as `INSTALL.bat` unless `-LogPath` is provided.
+A log file is written on every run to `.\logs\` unless `-LogPath` is provided.
 
 Filename pattern:
 - `install-YYYYMMDD-HHMMSS.log`
 
 Example:
-- `install-20260210-153045.log`
+- `logs\install-20260210-153045.log`
 
 The log contains BAT + PowerShell output, including:
 - URL/signature validation
 - driver staging status
 - printer/port checks
 - postcondition pass/fail details
+
+## Release packaging
+Run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Pack-Release.ps1
+```
+
+Default output location:
+- sibling directory to repo root: `..\builds\Install-Brother-MFCL9570CDW\`
 
 ## Exit behavior
 - Exit code `0` = success

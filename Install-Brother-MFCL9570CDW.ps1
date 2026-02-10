@@ -720,7 +720,7 @@ try {
   }
 
   if ([string]::IsNullOrWhiteSpace($LogPath)) {
-    $LogPath = Join-Path $PSScriptRoot ("install-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $LogPath = Join-Path (Join-Path $PSScriptRoot "logs") ("install-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
   }
   $script:LogPath = $LogPath
   $logDir = Split-Path -Path $script:LogPath -Parent
