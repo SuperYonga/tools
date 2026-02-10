@@ -91,6 +91,17 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-regression-tests.ps1
 ```
 
+Or via npm entrypoint:
+
+```powershell
+npm test
+```
+
 Artifacts:
 - `tests\artifacts\pester-results.xml`
 - per-test logs in `tests\artifacts\*.log`
+
+## CI
+- GitHub Actions workflow: `.github/workflows/regression-tests.yml`
+- Trigger: push to `main` or `issue-*`, and pull requests into `main`.
+- Runner: `windows-latest` with PowerShell + Pester regression execution via `npm test`.

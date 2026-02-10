@@ -56,7 +56,7 @@
 ### 7b) Shift-left strategies
 1. Keep regression tests as release gate before packaging zip artifacts.
 2. Continue logging full parameter set + derived cache artifacts for traceability.
-3. Add CI later once a remote is configured (local-only repo currently).
+3. Add CI + npm test entrypoint so regressions run consistently in local/dev/CI paths.
 
 ## 8) Intervention implemented
 - Updated `Install-Brother-MFCL9570CDW-Launcher.ps1`:
@@ -70,6 +70,10 @@
   - Expanded parameter/cache logging for evidence.
 - Updated docs:
   - `README-Install-Brother-MFCL9570CDW.md` with custom `-DriverUrl` usage examples.
+- Added test entrypoint:
+  - `package.json` with `npm test` and `npm run test:regression` scripts.
+- Added CI workflow:
+  - `.github/workflows/regression-tests.yml` (Windows runner, Pester presence check, `npm test`, artifact upload).
 - Updated tests:
   - Added regression case for allowed custom driver URL logging and derived artifact naming.
   - Added regression case for invalid driver host fail-fast behavior.
@@ -77,6 +81,7 @@
 ## 9) Evaluation (evidence)
 - Command:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-regression-tests.ps1`
+  - `npm test`
 - Result:
   - `Passed: 11 Failed: 0`
 - Evidence file:
@@ -90,7 +95,7 @@
 
 ## 11) Documentation-as-code
 - This file provides SOAPIER-style session documentation and evidence trail.
-- README updated for end-user invocation patterns.
+- README updated for end-user invocation patterns plus npm/CI testing paths.
 
 ## 12) Git hygiene completed
 - Local repo initialized.
@@ -101,7 +106,7 @@
 - Local issue: present (this file).
 - Branch: present (`issue-1-pluggable-printer-driver-input`).
 - Documentation: present.
-- Testing: green (11/11).
+- Testing: green (11/11) via PowerShell runner and npm entrypoint.
 
 ## 14) Finish status
 - Complete for local repo workflow.

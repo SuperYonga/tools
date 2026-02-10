@@ -1,0 +1,10 @@
+{
+  "name": "install-brother-mfcl9570cdw",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Regression test entrypoints for Brother MFC-L9570CDW installer",
+  "scripts": {
+    "test": "npm run test:regression",
+    "test:regression": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tests\\run-regression-tests.ps1"
+  }
+}
