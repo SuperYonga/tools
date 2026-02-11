@@ -238,27 +238,13 @@ function Prepare-OutlookFailureDraft {
   $logContent = Get-LogContent -Full
   $fullBody = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogContent $logContent
 
-  $mailtoMaxBodyChars = 4500
-  if (-not [string]::IsNullOrWhiteSpace($env:SC_MAILTO_MAX_BODY_CHARS)) {
-    $parsedMax = 0
-    if ([int]::TryParse($env:SC_MAILTO_MAX_BODY_CHARS, [ref]$parsedMax) -and $parsedMax -gt 512) {
-      $mailtoMaxBodyChars = $parsedMax
-    }
-  }
-
-  $mailtoBody = $fullBody
-  if ($mailtoBody.Length -gt $mailtoMaxBodyChars) {
-    $mailtoBody = $mailtoBody.Substring(0, $mailtoMaxBodyChars) + [Environment]::NewLine + "[TRUNCATED] Open log file for full details."
-    Write-LauncherLog ("Mailto body truncated to {0} chars. Set SC_MAILTO_MAX_BODY_CHARS higher if needed." -f $mailtoMaxBodyChars) "WARN"
-  }
-
   try {
     $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
       [Uri]::EscapeDataString($NotifyTo),
       [Uri]::EscapeDataString($subject),
-      [Uri]::EscapeDataString($mailtoBody))
+      [Uri]::EscapeDataString($fullBody))
     Start-Process $mailToUri | Out-Null
-    Write-LauncherLog ("Default mail client draft opened for '{0}' (mode=default)." -f $NotifyTo)
+    Write-LauncherLog ("Default mail client draft opened for '{0}' (mode=default, body=full-log)." -f $NotifyTo)
     return
   }
   catch {
@@ -302,6 +288,11 @@ function Invoke-FailureComms {
     [int]$ExitCode,
     [string]$FailureMessage
   )
+
+  if ($ExitCode -eq 0) {
+    Write-LauncherLog "Failure comms skipped because exit code is zero."
+    return
+  }
 
   Write-LauncherLog ("Failure handler triggered. ExitCode={0}, Reason='{1}'" -f $ExitCode, $FailureMessage) "ERROR"
   Prepare-OutlookFailureDraft -ExitCode $ExitCode -FailureMessage $FailureMessage

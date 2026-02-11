@@ -170,22 +170,15 @@ Describe "Brother installer regression tests" {
     }
   }
 
-  It "launcher mail-draft path logs enabled and handles unavailable clients safely" {
+  It "launcher mail-draft path logs enabled and uses full log body without truncation" {
     $logPath = New-TestLogPath -Prefix "launcher-outlook-failure"
-    $oldMailtoMaxBody = $env:SC_MAILTO_MAX_BODY_CHARS
-    try {
-      $env:SC_MAILTO_MAX_BODY_CHARS = "700"
-      $result = Invoke-LauncherPs1 -Args @("-ValidateOnly","-PrinterIP","999.0.0.1") -LogPath $logPath
+    $result = Invoke-LauncherPs1 -Args @("-ValidateOnly","-PrinterIP","999.0.0.1") -LogPath $logPath
 
-      $result.ExitCode | Should Not Be 0
-      ($result.LogText -match "Failure handler triggered") | Should Be $true
-      ($result.LogText -match "Outlook failure draft mode: always-on \(default mode=default-client, fallback=notepad instructions\)") | Should Be $true
-      ($result.LogText -match "Mailto body truncated") | Should Be $true
-      ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Manual fallback opened in Notepad|Manual Notepad fallback failed") | Should Be $true
-    }
-    finally {
-      if ($null -eq $oldMailtoMaxBody) { Remove-Item Env:SC_MAILTO_MAX_BODY_CHARS -ErrorAction SilentlyContinue } else { $env:SC_MAILTO_MAX_BODY_CHARS = $oldMailtoMaxBody }
-    }
+    $result.ExitCode | Should Not Be 0
+    ($result.LogText -match "Failure handler triggered") | Should Be $true
+    ($result.LogText -match "Outlook failure draft mode: always-on \(default mode=default-client, fallback=notepad instructions\)") | Should Be $true
+    ($result.LogText -match "Mailto body truncated") | Should Be $false
+    ($result.LogText -match "Default mail client draft opened for '.*' \(mode=default, body=full-log\)|Default mail client draft failed|Manual fallback opened in Notepad|Manual Notepad fallback failed") | Should Be $true
   }
 
   It "ValidateOnly run succeeds and logs completion" {
@@ -195,6 +188,8 @@ Describe "Brother installer regression tests" {
     $result.ExitCode | Should Be 0
     ($result.LogText -match "Mode: ValidateOnly") | Should Be $true
     ($result.LogText -match "ValidateOnly completed\. No printer objects or queue state were modified\.") | Should Be $true
+    ($result.LogText -match "Failure handler triggered") | Should Be $false
+    ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Failure notification email sent") | Should Be $false
     (Test-Path (Join-Path $testWorkRoot "cache\Y16E_C1-hostm-K1.sha256")) | Should Be $false
   }
 

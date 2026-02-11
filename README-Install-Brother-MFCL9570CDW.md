@@ -111,8 +111,6 @@ Behavior:
 - On failure, it creates an Outlook mail item addressed to `henry@supercivil.com.au` (or `-NotifyTo` override).
 - Subject is prefilled with host + exit code.
 - Body includes failure context, `User Action Required` steps, and full log content.
-- In `mailto` mode, body length is capped (default `4500` chars) to keep URI launch reliable.
-- Optional override: `SC_MAILTO_MAX_BODY_CHARS` (must be >512).
 - If draft open fails, Notepad opens with manual instructions and asks the user to email `henry@supercivil.com.au` with the run log attached.
 
 ## Release packaging
