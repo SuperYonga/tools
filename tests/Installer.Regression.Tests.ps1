@@ -146,7 +146,7 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "Get-LogContent -Full") | Should Be $true
   }
 
-  It "launcher failure notification path logs skip when SMTP is not configured" {
+  It "launcher failure notification path uses a single mail-draft channel when SMTP is not configured" {
     $logPath = New-TestLogPath -Prefix "launcher-notify-failure"
     $oldHost = $env:SC_SMTP_HOST
     $oldServer = $env:SC_SMTP_SERVER
@@ -161,7 +161,8 @@ Describe "Brother installer regression tests" {
       $result.ExitCode | Should Not Be 0
       ($result.LogText -match "Failure handler triggered") | Should Be $true
       ($result.LogText -match "Failure notification mode: always-on") | Should Be $true
-      ($result.LogText -match "Failure notification requested but skipped") | Should Be $true
+      ($result.LogText -match "Failure comms channel selected: mail-draft-primary \(single email action per run\)") | Should Be $true
+      ($result.LogText -match "Failure notification requested but skipped") | Should Be $false
     }
     finally {
       if ($null -eq $oldHost) { Remove-Item Env:SC_SMTP_HOST -ErrorAction SilentlyContinue } else { $env:SC_SMTP_HOST = $oldHost }
@@ -177,8 +178,15 @@ Describe "Brother installer regression tests" {
     $result.ExitCode | Should Not Be 0
     ($result.LogText -match "Failure handler triggered") | Should Be $true
     ($result.LogText -match "Outlook failure draft mode: always-on \(default mode=default-client, fallback=notepad instructions\)") | Should Be $true
+    ($result.LogText -match "Failure comms channel selected: mail-draft-primary \(single email action per run\)") | Should Be $true
     ($result.LogText -match "Mailto body truncated") | Should Be $false
     ($result.LogText -match "Default mail client draft opened for '.*' \(mode=default, body=full-log\)|Default mail client draft failed|Manual fallback opened in Notepad|Manual Notepad fallback failed") | Should Be $true
+  }
+
+  It "launcher central failure comms guard prevents duplicate trigger handling in one run" {
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+    ($launcherContent.Contains('$script:FailureCommsTriggered = $false')) | Should Be $true
+    ($launcherContent -match "Failure comms already handled for this run\. Skipping duplicate trigger") | Should Be $true
   }
 
   It "ValidateOnly run succeeds and logs completion" {

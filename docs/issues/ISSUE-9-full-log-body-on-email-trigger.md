@@ -7,6 +7,7 @@
 ## Presenting Issue
 - Failure draft/email body was being truncated in the default mail-client (`mailto`) path.
 - User requirement: include full log content whenever failure email/draft condition is triggered, and verify trigger logic is correct.
+- Additional requirement: only one email action should be created per failed run.
 
 ## Past History
 - `ISSUE-6`: made failure comms always-on.
@@ -20,15 +21,17 @@
 
 ## Objective Assessment (Testing + Source Review)
 - Source review findings:
-  - `Install-Brother-MFCL9570CDW-Launcher.ps1` used `SC_MAILTO_MAX_BODY_CHARS` with truncation marker in draft path.
-  - Failure comms function lacked a defensive zero-exit guard.
+  - `Install-Brother-MFCL9570CDW-Launcher.ps1` previously used `SC_MAILTO_MAX_BODY_CHARS` with truncation marker in draft path.
+  - Failure comms had a mode where both draft and SMTP paths could run in the same failed invocation.
 - Implemented updates:
   - removed draft truncation logic; full body now passed to default mail client attempt.
-  - added explicit guard: skip failure comms if `ExitCode = 0`.
-  - updated tests to enforce no truncation warning and no failure comms on successful run.
+  - added central duplicate guard (`$script:FailureCommsTriggered`) to avoid re-handling.
+  - switched to single-channel per run: SMTP primary when configured, otherwise draft primary; SMTP failure falls back to draft.
+  - kept failure-only trigger behavior (`ExitCode <> 0`) and full-log body in all email paths.
+  - updated tests to enforce these outcomes.
 - Regression validation:
   - `npm test`
-  - Passed: `18`, Failed: `0`
+  - Passed: `19`, Failed: `0`
   - Evidence: `tests/artifacts/pester-results.xml`
 
 ## Analysis
@@ -45,28 +48,35 @@ References:
 - OWASP Logging Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
 
 ## Plan
-1. Remove `mailto` truncation path so draft body always uses full failure payload.
-2. Add a central non-zero guard in `Invoke-FailureComms`.
-3. Update regression tests and README to match behavior.
-4. Re-run full regression tests.
+1. Keep full-log body behavior in failure comms.
+2. Enforce one failure email action per run.
+3. Add duplicate-trigger guard in failure comms.
+4. Update regression tests and README.
+5. Re-run full regression tests.
 
 ## Intervention
 - `Install-Brother-MFCL9570CDW-Launcher.ps1`
-  - Removed `SC_MAILTO_MAX_BODY_CHARS` truncation branch.
-  - Updated draft success log to indicate `body=full-log`.
-  - Added explicit guard in `Invoke-FailureComms` to skip on `ExitCode=0`.
+  - Maintained full-log body in draft and SMTP paths.
+  - Added `$script:FailureCommsTriggered` duplicate guard and skip log.
+  - Added single-channel selection in `Invoke-FailureComms`:
+    - `smtp-primary` when SMTP is configured.
+    - `mail-draft-primary` when SMTP is not configured.
+    - draft fallback if SMTP send fails.
 - `tests/Installer.Regression.Tests.ps1`
-  - Updated mail-draft regression test to assert no truncation warnings.
-  - Added success-path assertion: no failure comms/draft send markers in successful `ValidateOnly` run.
+  - Updated failure test to assert `mail-draft-primary` channel selection when SMTP is missing.
+  - Added assertion that SMTP skip log is absent in draft-primary path.
+  - Added guard-presence regression for duplicate handling protection.
 - `README-Install-Brother-MFCL9570CDW.md`
-  - Removed truncation and `SC_MAILTO_MAX_BODY_CHARS` documentation.
+  - Documented single-email-action-per-run channel behavior.
 
 ## Evaluation
 - Executed: `npm test`
-- Result: `18 passed, 0 failed`
+- Result: `19 passed, 0 failed`
 - Evidence:
   - `tests/artifacts/pester-results.xml`
-  - Updated regression case `launcher mail-draft path logs enabled and uses full log body without truncation`
+  - Updated regression cases:
+    - `launcher failure notification path uses a single mail-draft channel when SMTP is not configured`
+    - `launcher central failure comms guard prevents duplicate trigger handling in one run`
 
 ## Review
 - DONE for this issue scope.

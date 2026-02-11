@@ -78,7 +78,9 @@ The log contains BAT + PowerShell output, including:
 - Keep `cmd` open for every run: set `SC_PAUSE=1`.
 
 ## Failure email notification
-The launcher always attempts to send an email when a run fails (non-zero exit or launcher exception).
+On failure (non-zero exit or launcher exception), the launcher performs a single failure email action per run:
+- If SMTP is configured, SMTP send is attempted first.
+- If SMTP send is not configured or fails, a prefilled default mail-client draft is opened instead.
 
 Optional recipient override:
 - `-NotifyTo "henry@supercivil.com.au"` (default is already `henry@supercivil.com.au`)
@@ -101,7 +103,7 @@ Email content includes:
 - full log content from the run
 
 ## Outlook draft on failure (Windows desktop)
-The launcher always attempts to open a prefilled draft in the default Windows mail client on failure (including whichever Outlook profile/app is currently configured).
+The launcher uses a prefilled draft in the default Windows mail client as the primary failure path when SMTP is not configured, and as fallback if SMTP send fails.
 
 Draft mode:
 - Default: uses system default mail client first (`default`) so the currently configured Outlook/mail app is respected

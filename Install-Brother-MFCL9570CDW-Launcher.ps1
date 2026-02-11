@@ -13,6 +13,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:FailureCommsTriggered = $false
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installerPs1 = Join-Path $scriptDir "Install-Brother-MFCL9570CDW.ps1"
@@ -180,7 +181,7 @@ function Send-FailureNotification {
 
   if ([string]::IsNullOrWhiteSpace($smtpHost) -or [string]::IsNullOrWhiteSpace($smtpFrom)) {
     Write-LauncherLog "Failure notification requested but skipped: missing SC_SMTP_HOST/SC_SMTP_SERVER or SC_SMTP_FROM." "WARN"
-    return
+    return [PSCustomObject]@{ Attempted = $false; Succeeded = $false }
   }
 
   $smtpPort = 587
@@ -217,9 +218,11 @@ function Send-FailureNotification {
 
     $smtp.Send($mail)
     Write-LauncherLog ("Failure notification email sent to '{0}' via '{1}:{2}'." -f $NotifyTo, $smtpHost, $smtpPort)
+    return [PSCustomObject]@{ Attempted = $true; Succeeded = $true }
   }
   catch {
     Write-LauncherLog ("Failure notification send failed: {0}" -f $_.Exception.Message) "WARN"
+    return [PSCustomObject]@{ Attempted = $true; Succeeded = $false }
   }
 }
 
@@ -293,10 +296,30 @@ function Invoke-FailureComms {
     Write-LauncherLog "Failure comms skipped because exit code is zero."
     return
   }
+  if ($script:FailureCommsTriggered) {
+    Write-LauncherLog ("Failure comms already handled for this run. Skipping duplicate trigger. ExitCode={0}" -f $ExitCode) "WARN"
+    return
+  }
+  $script:FailureCommsTriggered = $true
 
   Write-LauncherLog ("Failure handler triggered. ExitCode={0}, Reason='{1}'" -f $ExitCode, $FailureMessage) "ERROR"
+  $smtpHost = $env:SC_SMTP_HOST
+  if ([string]::IsNullOrWhiteSpace($smtpHost)) { $smtpHost = $env:SC_SMTP_SERVER }
+  $smtpFrom = $env:SC_SMTP_FROM
+  $smtpConfigured = -not [string]::IsNullOrWhiteSpace($smtpHost) -and -not [string]::IsNullOrWhiteSpace($smtpFrom)
+
+  if ($smtpConfigured) {
+    Write-LauncherLog "Failure comms channel selected: smtp-primary (single email action per run)."
+    $smtpResult = Send-FailureNotification -ExitCode $ExitCode -FailureMessage $FailureMessage
+    if (-not $smtpResult.Succeeded) {
+      Write-LauncherLog "SMTP send did not complete; falling back to default mail draft path." "WARN"
+      Prepare-OutlookFailureDraft -ExitCode $ExitCode -FailureMessage $FailureMessage
+    }
+    return
+  }
+
+  Write-LauncherLog "Failure comms channel selected: mail-draft-primary (single email action per run)."
   Prepare-OutlookFailureDraft -ExitCode $ExitCode -FailureMessage $FailureMessage
-  Send-FailureNotification -ExitCode $ExitCode -FailureMessage $FailureMessage
 }
 
 if (-not (Test-Path $installerPs1)) {
