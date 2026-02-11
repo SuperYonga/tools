@@ -5,6 +5,8 @@ $projectRoot = Split-Path -Parent $here
 $installerPs1 = Join-Path $projectRoot "Install-Brother-MFCL9570CDW.ps1"
 $installBat = Join-Path $projectRoot "INSTALL.bat"
 $codexTestRunner = Join-Path $projectRoot "_codex_test_runner.cmd"
+$launcherPs1 = Join-Path $projectRoot "Install-Brother-MFCL9570CDW-Launcher.ps1"
+$packReleasePs1 = Join-Path $projectRoot "Pack-Release.ps1"
 $logDir = Join-Path $projectRoot "tests\artifacts"
 $testWorkRoot = Join-Path $logDir "workroot"
 $pendingQueuePath = Join-Path $testWorkRoot "pending-test-pages.json"
@@ -51,6 +53,22 @@ function Invoke-InstallerPs1 {
   }
 }
 
+function Invoke-Ps1File {
+  param(
+    [Parameter(Mandatory = $true)][string]$ScriptPath,
+    [string[]]$Args = @()
+  )
+
+  $pwsh = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+  if (-not (Test-Path $pwsh)) { $pwsh = "powershell.exe" }
+
+  $output = & $pwsh -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @Args 2>&1
+  return [PSCustomObject]@{
+    ExitCode = $LASTEXITCODE
+    Output = ($output | Out-String)
+  }
+}
+
 Describe "Brother installer regression tests" {
   BeforeEach {
     if (Test-Path $testWorkRoot) {
@@ -69,6 +87,14 @@ Describe "Brother installer regression tests" {
     $content = Get-Content -Path $codexTestRunner -Raw
     ($content -match "INSTALL\.bat") | Should Be $true
     ($content -match "Install-Brother-MFCL9570CDW\.bat") | Should Be $false
+  }
+
+  It "installer and launcher default logs write to logs directory" {
+    $installerContent = Get-Content -Path $installerPs1 -Raw
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+
+    ($installerContent -match 'Join-Path \(Join-Path \$PSScriptRoot "logs"\)') | Should Be $true
+    ($launcherContent -match 'Join-Path \(Join-Path \$scriptDir "logs"\)') | Should Be $true
   }
 
   It "ValidateOnly run succeeds and logs completion" {
@@ -205,5 +231,26 @@ Describe "Brother installer regression tests" {
 
     $result.ExitCode | Should Be 0
     ($result.LogText -match "Scheduled retry task ensured|Could not ensure scheduled retry task|ScheduledTasks cmdlets are unavailable; cannot ensure retry task") | Should Be $true
+  }
+
+  It "Pack-Release default output dir points to sibling builds folder and produces zip" {
+    $expectedOutputDir = Join-Path (Join-Path (Split-Path -Parent $projectRoot) "builds") "Install-Brother-MFCL9570CDW"
+    $before = @()
+    if (Test-Path $expectedOutputDir) {
+      $before = @(Get-ChildItem -Path $expectedOutputDir -Filter "Brother-MFCL9570CDW-Installer-*.zip" -File | Select-Object -ExpandProperty FullName)
+    }
+
+    $result = Invoke-Ps1File -ScriptPath $packReleasePs1
+    $result.ExitCode | Should Be 0
+    ($result.Output -match "Created release zip: ") | Should Be $true
+
+    (Test-Path $expectedOutputDir) | Should Be $true
+    $after = @(Get-ChildItem -Path $expectedOutputDir -Filter "Brother-MFCL9570CDW-Installer-*.zip" -File | Select-Object -ExpandProperty FullName)
+    $new = @($after | Where-Object { $before -notcontains $_ })
+    $new.Count -ge 1 | Should Be $true
+
+    foreach ($path in $new) {
+      if (Test-Path $path) { Remove-Item -Path $path -Force -ErrorAction SilentlyContinue }
+    }
   }
 }
