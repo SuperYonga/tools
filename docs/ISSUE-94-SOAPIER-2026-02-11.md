@@ -155,3 +155,32 @@
 
 ## (14) Finish
 - Ready to commit and push branch for CI and manual PR workflow.
+
+---
+
+## Addendum (2026-02-11 13:55 local) - Validation Against Operator Log
+
+### Presenting log snapshot
+- Operator log reviewed:
+  - `F:\Install-Brother-MFCL9570CDW\logs\install-20260211-131406.log`
+- Observed in that run:
+  1. test page attempts were `1/3`, `2/3`, `3/3`
+  2. scheduled task warning included `"RepetitionInterval" cannot be found`
+  3. run completed with installer `exit code=0`, so launcher failure comms did not trigger
+
+### Assessment
+- The `F:\...` run behavior maps to pre-fix script behavior (older packaged copy), not the current `issue-94` branch head.
+- Current branch evidence:
+  - single invoke for install/retry: `Install-Brother-MFCL9570CDW.ps1:47`, `Install-Brother-MFCL9570CDW.ps1:48`
+  - degraded test-page evidence exits non-zero (`exit 2`): `Install-Brother-MFCL9570CDW.ps1:1008`, `Install-Brother-MFCL9570CDW.ps1:1009`
+  - success diagnostics mode available: `Install-Brother-MFCL9570CDW-Launcher.ps1:335`, `Install-Brother-MFCL9570CDW-Launcher.ps1:446`
+  - token error mitigation and default-printer handling present: `Install-Brother-MFCL9570CDW.ps1:755`, `Install-Brother-MFCL9570CDW.ps1:772`
+
+### Objective re-validation
+- Re-ran full test entrypoint:
+  - `npm test`
+  - Result: `Passed: 25, Failed: 0`
+  - XML evidence: `tests/artifacts/pester-results.xml`
+
+### Operator guidance
+- To observe fixed behavior on device, run the latest script/package built from branch `issue-94-printer-retry-comms-default-printer` rather than the older `F:\...` copy.
