@@ -42,6 +42,7 @@ $PendingRetryMaxAttempts = 96
 $PendingRetryBaseMinutes = 5
 $PendingRetryMaxBackoffMinutes = 240
 $PendingRetryTtlDays = 7
+$ReachabilityTimeoutMs = 2500
 $DefaultDriverFileName = "Y16E_C1-hostm-K1.EXE"
 $driverUriForPath = $null
 try { $driverUriForPath = [Uri]$DriverUrl } catch { $driverUriForPath = $null }
@@ -89,27 +90,27 @@ function Test-HostAllowed {
 }
 
 function Test-Tcp9100 {
-  param([string]$Ip)
-  $tnc = Get-Command Test-NetConnection -ErrorAction SilentlyContinue
-  if ($tnc) {
-    try {
-      $r = Test-NetConnection -ComputerName $Ip -Port 9100 -WarningAction SilentlyContinue
-      return [PSCustomObject]@{ Method = "Test-NetConnection"; Reachable = [bool]$r.TcpTestSucceeded }
-    } catch {
-      return [PSCustomObject]@{ Method = "Test-NetConnection"; Reachable = $false }
-    }
-  }
+  param(
+    [string]$Ip,
+    [int]$TimeoutMs = 2500
+  )
 
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
   $client = $null
   try {
     $client = New-Object System.Net.Sockets.TcpClient
     $iar = $client.BeginConnect($Ip, 9100, $null, $null)
-    $ok = $iar.AsyncWaitHandle.WaitOne(2500, $false)
-    if (-not $ok) { return [PSCustomObject]@{ Method = "TcpClient"; Reachable = $false } }
+    $ok = $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
+    if (-not $ok) {
+      $sw.Stop()
+      return [PSCustomObject]@{ Method = "TcpClient"; Reachable = $false; ElapsedMs = [int]$sw.Elapsed.TotalMilliseconds }
+    }
     $client.EndConnect($iar) | Out-Null
-    return [PSCustomObject]@{ Method = "TcpClient"; Reachable = $true }
+    $sw.Stop()
+    return [PSCustomObject]@{ Method = "TcpClient"; Reachable = $true; ElapsedMs = [int]$sw.Elapsed.TotalMilliseconds }
   } catch {
-    return [PSCustomObject]@{ Method = "TcpClient"; Reachable = $false }
+    $sw.Stop()
+    return [PSCustomObject]@{ Method = "TcpClient"; Reachable = $false; ElapsedMs = [int]$sw.Elapsed.TotalMilliseconds }
   } finally {
     if ($client) { $client.Close() }
   }
@@ -641,8 +642,9 @@ function Process-PendingTestPageRequests {
       continue
     }
 
-    $reach = Test-Tcp9100 -Ip $queueIp
-    Write-Log ("Pending request reachability {0}:9100 via {1} => {2}" -f $queueIp, $reach.Method, $reach.Reachable)
+    Write-Log ("Pending request stage: probing reachability to {0}:9100 with timeout={1}ms" -f $queueIp, $ReachabilityTimeoutMs)
+    $reach = Test-Tcp9100 -Ip $queueIp -TimeoutMs $ReachabilityTimeoutMs
+    Write-Log ("Pending request reachability {0}:9100 via {1} => {2} (elapsed={3}ms)" -f $queueIp, $reach.Method, $reach.Reachable, $reach.ElapsedMs)
     if (-not $reach.Reachable) {
       Write-Log ("Pending request deferred: printer network endpoint is not reachable for '{0}'." -f $queueIp) "WARN"
       $remaining += New-PendingTestPageRequestRecord -QueueName $queueName -QueueIp $queueIp -Reason ("Printer endpoint '{0}:9100' unreachable." -f $queueIp) -PreviousAttemptCount $attemptCount -RequestedAt ([string]$req.RequestedAt) -ExistingExpiresAt ([string]$req.ExpiresAt)
@@ -766,8 +768,9 @@ try {
     Fail "Install path requires Windows PowerShell 5.1 (Desktop edition)."
   }
 
-  $reach = Test-Tcp9100 -Ip $PrinterIP
-  Write-Log ("Reachability to {0}:9100 via {1} => {2}" -f $PrinterIP, $reach.Method, $reach.Reachable)
+  Write-Log ("Stage: probing reachability to {0}:9100 with timeout={1}ms" -f $PrinterIP, $ReachabilityTimeoutMs)
+  $reach = Test-Tcp9100 -Ip $PrinterIP -TimeoutMs $ReachabilityTimeoutMs
+  Write-Log ("Reachability to {0}:9100 via {1} => {2} (elapsed={3}ms)" -f $PrinterIP, $reach.Method, $reach.Reachable, $reach.ElapsedMs)
 
   Import-PrintManagementOrFail
 

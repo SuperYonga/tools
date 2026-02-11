@@ -123,6 +123,15 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match 'Join-Path \(Join-Path \$scriptDir "logs"\)') | Should Be $true
   }
 
+  It "installer reachability logging includes timeout and elapsed evidence in install and retry paths" {
+    $installerContent = Get-Content -Path $installerPs1 -Raw
+    ($installerContent -match '\$ReachabilityTimeoutMs\s*=\s*2500') | Should Be $true
+    ($installerContent -match 'Stage: probing reachability to \{0\}:9100 with timeout=\{1\}ms') | Should Be $true
+    ($installerContent -match 'Pending request stage: probing reachability to \{0\}:9100 with timeout=\{1\}ms') | Should Be $true
+    ($installerContent -match 'Reachability to \{0\}:9100 via \{1\} => \{2\} \(elapsed=\{3\}ms\)') | Should Be $true
+    ($installerContent -match 'Pending request reachability \{0\}:9100 via \{1\} => \{2\} \(elapsed=\{3\}ms\)') | Should Be $true
+  }
+
   It "launcher failure notifications include a user action guidance block" {
     $launcherContent = Get-Content -Path $launcherPs1 -Raw
     ($launcherContent -match "function New-FailureMessageBody") | Should Be $true
@@ -195,6 +204,8 @@ Describe "Brother installer regression tests" {
 
     $result.ExitCode | Should Be 0
     ($result.LogText -match "Mode: ValidateOnly") | Should Be $true
+    ($result.LogText -match "Stage: probing reachability to 192\.168\.0\.120:9100 with timeout=2500ms") | Should Be $true
+    ($result.LogText -match "Reachability to 192\.168\.0\.120:9100 via TcpClient => (True|False) \(elapsed=\d+ms\)") | Should Be $true
     ($result.LogText -match "ValidateOnly completed\. No printer objects or queue state were modified\.") | Should Be $true
     ($result.LogText -match "Failure handler triggered") | Should Be $false
     ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Failure notification email sent") | Should Be $false
