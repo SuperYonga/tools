@@ -134,7 +134,12 @@ Describe "Brother installer regression tests" {
     ($installerContent -match 'Pending request reachability \{0\}:9100 via \{1\} => \{2\} \(elapsed=\{3\}ms\)') | Should Be $true
     ($installerContent -match 'Reachability warning: \{0\}:9100 was not reachable\. Continuing install for offline provisioning; verify printer power/network if test page evidence is absent\.') | Should Be $true
     ($installerContent -match "Test page verification degraded: \{0\}") | Should Be $true
+    ($installerContent -match "Test page postcondition failed: \{0\}") | Should Be $true
     ($installerContent -match "Install completed with degraded verification\. Exiting non-zero to trigger failure comms\. Reasons='\{0\}'") | Should Be $true
+    ($installerContent -match 'Invoke-TestPageWithEvidence -QueueName \$PrinterName -InvokeAttempts \$TestPageInvokeAttemptsInstall -ObserveSeconds \$TestPageObserveSeconds') | Should Be $true
+    ($installerContent -match 'Invoke-TestPageWithEvidence -QueueName \$queueName -InvokeAttempts \$TestPageInvokeAttemptsRetry -ObserveSeconds \$TestPageObserveSeconds') | Should Be $true
+    ($installerContent -match '\$TestPageInvokeAttemptsInstall\s*=\s*1') | Should Be $true
+    ($installerContent -match '\$TestPageInvokeAttemptsRetry\s*=\s*1') | Should Be $true
     ($installerContent -match "exit 2") | Should Be $true
   }
 
@@ -172,6 +177,14 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "function Invoke-FailureComms") | Should Be $true
     ($launcherContent -match "Failure handler triggered") | Should Be $true
     ($launcherContent -match "Get-LogContent -Full") | Should Be $true
+  }
+
+  It "launcher supports optional success diagnostic comms mode" {
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+    ($launcherContent -match "function Invoke-SuccessDiagnosticComms") | Should Be $true
+    ($launcherContent -match "SC_NOTIFY_ALWAYS") | Should Be $true
+    ($launcherContent -match "Success diagnostic comms mode:") | Should Be $true
+    ($launcherContent -match "NotifyAlways") | Should Be $true
   }
 
   It "launcher failure notification path uses a single mail-draft channel when SMTP is not configured" {
@@ -217,6 +230,26 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "Failure comms already handled for this run\. Skipping duplicate trigger") | Should Be $true
   }
 
+  It "launcher can emit success diagnostics when NotifyAlways is enabled" {
+    $logPath = New-TestLogPath -Prefix "launcher-success-diagnostics"
+    $result = Invoke-LauncherPs1 -Args @("-ValidateOnly","-SkipSignatureCheck","-NotifyAlways") -LogPath $logPath
+
+    $result.ExitCode | Should Be 0
+    ($result.LogText -match "Success diagnostic comms mode: enabled") | Should Be $true
+    ($result.LogText -match "Success diagnostic comms mode enabled\. Sending diagnostic success message\.") | Should Be $true
+    ($result.LogText -match "Diagnostic success notification email sent|Diagnostic success SMTP send failed|Diagnostic success mail draft opened|Diagnostic success mail draft failed") | Should Be $true
+  }
+
+  It "installer contains printer creation fallback and default-printer best-effort path" {
+    $installerContent = Get-Content -Path $installerPs1 -Raw
+    ($installerContent -match "function Ensure-PrinterQueueExists") | Should Be $true
+    ($installerContent -match "Add-Printer failed for") | Should Be $true
+    ($installerContent -match "0x000003f0") | Should Be $true
+    ($installerContent -match "function Set-DefaultPrinterBestEffort") | Should Be $true
+    ($installerContent -match "Postcondition: default printer is Name=") | Should Be $true
+    ($installerContent -match "NoSetDefaultPrinter") | Should Be $true
+  }
+
   It "ValidateOnly run succeeds and logs completion" {
     $logPath = New-TestLogPath -Prefix "validate-only"
     $result = Invoke-InstallerPs1 -Args @("-ValidateOnly","-SkipSignatureCheck") -LogPath $logPath -WorkRoot $testWorkRoot
@@ -227,7 +260,7 @@ Describe "Brother installer regression tests" {
     ($result.LogText -match "Reachability to 192\.168\.0\.120:9100 via TcpClient => (True|False) \(elapsed=\d+ms\)") | Should Be $true
     ($result.LogText -match "ValidateOnly completed\. No printer objects or queue state were modified\.") | Should Be $true
     ($result.LogText -match "Failure handler triggered") | Should Be $false
-    ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Failure notification email sent") | Should Be $false
+    ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Failure notification email sent|Diagnostic success") | Should Be $false
     (Test-Path (Join-Path $testWorkRoot "cache\Y16E_C1-hostm-K1.sha256")) | Should Be $false
   }
 

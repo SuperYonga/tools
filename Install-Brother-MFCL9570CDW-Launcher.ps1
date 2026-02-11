@@ -6,10 +6,12 @@ param(
   [switch]$ValidateOnly,
   [switch]$SkipSignatureCheck,
   [switch]$NoTestPage,
+  [switch]$NoSetDefaultPrinter,
   [string]$LogPath,
   [switch]$NotifyOnFailure,
   [string]$NotifyTo = "henry@supercivil.com.au",
-  [switch]$PrepareOutlookMailOnFailure
+  [switch]$PrepareOutlookMailOnFailure,
+  [switch]$NotifyAlways
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,6 +44,7 @@ function New-InstallerInvokeArgs {
   if ($ValidateOnly) { $invokeArgs.ValidateOnly = $true }
   if ($SkipSignatureCheck) { $invokeArgs.SkipSignatureCheck = $true }
   if ($NoTestPage) { $invokeArgs.NoTestPage = $true }
+  if ($NoSetDefaultPrinter) { $invokeArgs.NoSetDefaultPrinter = $true }
   return $invokeArgs
 }
 
@@ -66,6 +69,7 @@ function New-InstallerArgumentLine {
   if ($ValidateOnly) { $childArgs += "-ValidateOnly" }
   if ($SkipSignatureCheck) { $childArgs += "-SkipSignatureCheck" }
   if ($NoTestPage) { $childArgs += "-NoTestPage" }
+  if ($NoSetDefaultPrinter) { $childArgs += "-NoSetDefaultPrinter" }
   if (-not [string]::IsNullOrWhiteSpace($PrinterIP)) { $childArgs += "-PrinterIP " + (Quote-Arg -Value $PrinterIP) }
   if (-not [string]::IsNullOrWhiteSpace($PrinterName)) { $childArgs += "-PrinterName " + (Quote-Arg -Value $PrinterName) }
   if (-not [string]::IsNullOrWhiteSpace($DriverUrl)) { $childArgs += "-DriverUrl " + (Quote-Arg -Value $DriverUrl) }
@@ -322,6 +326,100 @@ function Invoke-FailureComms {
   Prepare-OutlookFailureDraft -ExitCode $ExitCode -FailureMessage $FailureMessage
 }
 
+function Get-DiagnosticCommsEnabled {
+  if ($NotifyAlways) { return $true }
+  if ($env:SC_NOTIFY_ALWAYS -eq "1") { return $true }
+  return $false
+}
+
+function Invoke-SuccessDiagnosticComms {
+  param([int]$ExitCode, [string]$Summary)
+
+  if ($ExitCode -ne 0) { return }
+  if (-not (Get-DiagnosticCommsEnabled)) { return }
+  if ($script:FailureCommsTriggered) {
+    Write-LauncherLog "Success diagnostic comms skipped: failure comms already handled for this run." "WARN"
+    return
+  }
+
+  Write-LauncherLog "Success diagnostic comms mode enabled. Sending diagnostic success message."
+
+  $smtpHost = $env:SC_SMTP_HOST
+  if ([string]::IsNullOrWhiteSpace($smtpHost)) { $smtpHost = $env:SC_SMTP_SERVER }
+  $smtpFrom = $env:SC_SMTP_FROM
+  $smtpConfigured = -not [string]::IsNullOrWhiteSpace($smtpHost) -and -not [string]::IsNullOrWhiteSpace($smtpFrom)
+
+  if ($smtpConfigured) {
+    $subject = ("[Printer Installer] SUCCESS on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
+    $logContent = Get-LogContent -Full
+    $body = @(
+      ("Time (UTC): {0}" -f (Get-Date).ToUniversalTime().ToString("o"))
+      ("Computer: {0}" -f $env:COMPUTERNAME)
+      ("User: {0}" -f [Environment]::UserName)
+      ("ExitCode: {0}" -f $ExitCode)
+      ("Summary: {0}" -f $Summary)
+      ("LogPath: {0}" -f $script:LogPath)
+      ""
+      "Full log content:"
+      $logContent
+    ) -join [Environment]::NewLine
+
+    try {
+      $smtpPort = 587
+      if (-not [string]::IsNullOrWhiteSpace($env:SC_SMTP_PORT)) {
+        $parsedPort = 0
+        if ([int]::TryParse($env:SC_SMTP_PORT, [ref]$parsedPort) -and $parsedPort -gt 0) { $smtpPort = $parsedPort }
+      }
+      $smtpUseSsl = $true
+      if ($env:SC_SMTP_SSL -eq "0") { $smtpUseSsl = $false }
+      $smtpUser = $env:SC_SMTP_USER
+      $smtpPass = $env:SC_SMTP_PASS
+
+      $mail = New-Object System.Net.Mail.MailMessage
+      $mail.From = $smtpFrom
+      $mail.To.Add($NotifyTo)
+      $mail.Subject = $subject
+      $mail.Body = $body
+
+      $smtp = New-Object System.Net.Mail.SmtpClient($smtpHost, $smtpPort)
+      $smtp.EnableSsl = $smtpUseSsl
+      if (-not [string]::IsNullOrWhiteSpace($smtpUser)) {
+        $smtp.Credentials = New-Object System.Net.NetworkCredential($smtpUser, $smtpPass)
+      }
+      else {
+        $smtp.UseDefaultCredentials = $true
+      }
+      $smtp.Send($mail)
+      Write-LauncherLog ("Diagnostic success notification email sent to '{0}' via '{1}:{2}'." -f $NotifyTo, $smtpHost, $smtpPort)
+      return
+    }
+    catch {
+      Write-LauncherLog ("Diagnostic success SMTP send failed: {0}" -f $_.Exception.Message) "WARN"
+    }
+  }
+
+  try {
+    $subject = ("[Printer Installer] SUCCESS on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
+    $logContent = Get-LogContent -Full
+    $body = @(
+      ("Summary: {0}" -f $Summary)
+      ("LogPath: {0}" -f $script:LogPath)
+      ""
+      "Full log content:"
+      $logContent
+    ) -join [Environment]::NewLine
+    $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
+      [Uri]::EscapeDataString($NotifyTo),
+      [Uri]::EscapeDataString($subject),
+      [Uri]::EscapeDataString($body))
+    Start-Process $mailToUri | Out-Null
+    Write-LauncherLog ("Diagnostic success mail draft opened for '{0}' (mode=default, body=full-log)." -f $NotifyTo)
+  }
+  catch {
+    Write-LauncherLog ("Diagnostic success mail draft failed: {0}" -f $_.Exception.Message) "WARN"
+  }
+}
+
 if (-not (Test-Path $installerPs1)) {
   Write-Error "Missing installer script: $installerPs1"
   Invoke-FailureComms -ExitCode 1 -FailureMessage ("Missing installer script: {0}" -f $installerPs1)
@@ -339,10 +437,13 @@ if (-not (Test-Path $script:LogPath)) { New-Item -ItemType File -Path $script:Lo
 
 Write-LauncherLog "Start launcher."
 Write-LauncherLog ("Installer path: {0}" -f $installerPs1)
-Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NotifyOnFailure={4}, PrepareOutlookMailOnFailure={5}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NotifyOnFailure, $PrepareOutlookMailOnFailure)
+Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NoSetDefaultPrinter={4}, NotifyOnFailure={5}, PrepareOutlookMailOnFailure={6}, NotifyAlways={7}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NoSetDefaultPrinter, $NotifyOnFailure, $PrepareOutlookMailOnFailure, $NotifyAlways)
 Write-LauncherLog ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', LogPath='{3}'" -f $PrinterIP, $PrinterName, $DriverUrl, $script:LogPath)
 Write-LauncherLog ("Failure notification mode: always-on. NotifyTo='{0}'" -f $NotifyTo)
 Write-LauncherLog ("Outlook failure draft mode: always-on (default mode=default-client, fallback=notepad instructions). NotifyTo='{0}'" -f $NotifyTo)
+$successDiagMode = "disabled"
+if (Get-DiagnosticCommsEnabled) { $successDiagMode = "enabled" }
+Write-LauncherLog ("Success diagnostic comms mode: {0} (enable via -NotifyAlways or SC_NOTIFY_ALWAYS=1)." -f $successDiagMode)
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -364,6 +465,9 @@ if (-not $isAdmin -and -not $ValidateOnly) {
     if ($p.ExitCode -ne 0) {
       Write-LauncherLog "Elevated process failed. Check installer logs after the last LAUNCHER line for root cause." "ERROR"
       Invoke-FailureComms -ExitCode $p.ExitCode -FailureMessage "Elevated installer process exited non-zero."
+    }
+    else {
+      Invoke-SuccessDiagnosticComms -ExitCode $p.ExitCode -Summary "Elevated installer process completed successfully."
     }
     Write-LauncherLog "Launcher exiting after elevated child."
     exit $p.ExitCode
@@ -387,6 +491,9 @@ try {
   Write-LauncherLog ("Installer exit code={0}" -f $rc)
   if ($rc -ne 0) {
     Invoke-FailureComms -ExitCode $rc -FailureMessage "Installer exited non-zero."
+  }
+  else {
+    Invoke-SuccessDiagnosticComms -ExitCode $rc -Summary "Installer process completed successfully."
   }
   Write-LauncherLog "Launcher complete."
   Write-Host ("Log file: {0}" -f $script:LogPath)

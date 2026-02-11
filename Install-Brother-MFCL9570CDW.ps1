@@ -15,6 +15,7 @@ param(
   [switch]$ValidateOnly,
   [switch]$SkipSignatureCheck,
   [switch]$NoTestPage,
+  [switch]$NoSetDefaultPrinter,
   [switch]$RetryPendingOnly,
   [string]$LogPath
 )
@@ -43,6 +44,9 @@ $PendingRetryBaseMinutes = 5
 $PendingRetryMaxBackoffMinutes = 240
 $PendingRetryTtlDays = 7
 $ReachabilityTimeoutMs = 2500
+$TestPageInvokeAttemptsInstall = 1
+$TestPageInvokeAttemptsRetry = 1
+$TestPageObserveSeconds = 20
 $DefaultDriverFileName = "Y16E_C1-hostm-K1.EXE"
 $driverUriForPath = $null
 try { $driverUriForPath = [Uri]$DriverUrl } catch { $driverUriForPath = $null }
@@ -657,7 +661,7 @@ function Process-PendingTestPageRequests {
       continue
     }
 
-    $result = Invoke-TestPageWithEvidence -QueueName $queueName -InvokeAttempts 2 -ObserveSeconds 20
+    $result = Invoke-TestPageWithEvidence -QueueName $queueName -InvokeAttempts $TestPageInvokeAttemptsRetry -ObserveSeconds $TestPageObserveSeconds
     if ($result.Success) {
       Write-Log ("Pending request completed for PrinterName='{0}'." -f $queueName)
       continue
@@ -724,6 +728,108 @@ function Update-PendingRetryTaskState {
   }
 }
 
+function Ensure-PrinterQueueExists {
+  param(
+    [Parameter(Mandatory = $true)][string]$QueueName,
+    [Parameter(Mandatory = $true)][string]$DriverName,
+    [Parameter(Mandatory = $true)][string]$PortName,
+    [Parameter(Mandatory = $true)][string]$InfPath
+  )
+
+  $existing = Get-Printer -Name $QueueName -ErrorAction SilentlyContinue
+  if ($existing) {
+    Write-Log ("Stage: printer '{0}' already exists." -f $QueueName)
+    return
+  }
+
+  $addPrinterSucceeded = $false
+  if (Get-Command Add-Printer -ErrorAction SilentlyContinue) {
+    try {
+      Write-Log ("Stage: creating printer '{0}' via Add-Printer (DriverName='{1}', PortName='{2}')" -f $QueueName, $DriverName, $PortName)
+      Add-Printer -Name $QueueName -DriverName $DriverName -PortName $PortName -ErrorAction Stop
+      Write-Log ("Add-Printer completed for '{0}'." -f $QueueName)
+      $addPrinterSucceeded = $true
+    }
+    catch {
+      $msg = $_.Exception.Message
+      Write-Log ("Add-Printer failed for '{0}': {1}" -f $QueueName, $msg) "WARN"
+      if ($msg -match "0x000003f0|token does not exist") {
+        Write-Log "Add-Printer failure appears token-related (0x000003f0). Falling back to printui." "WARN"
+      }
+    }
+  }
+
+  if (-not $addPrinterSucceeded) {
+    Write-Log ("Stage: creating printer '{0}' with model '{1}' via printui fallback" -f $QueueName, $DriverName)
+    & printui.exe /if /b "$QueueName" /f "$InfPath" /r "$PortName" /m "$DriverName"
+    Write-Log ("printui exit code: {0}" -f $LASTEXITCODE)
+  }
+}
+
+function Set-DefaultPrinterBestEffort {
+  param([Parameter(Mandatory = $true)][string]$QueueName)
+
+  if ($NoSetDefaultPrinter) {
+    Write-Log "NoSetDefaultPrinter specified. Skipping default printer set."
+    return
+  }
+
+  $defaultSet = $false
+  try {
+    $nameForFilter = $QueueName.Replace("'", "''")
+    $printerCim = Get-CimInstance -ClassName Win32_Printer -Filter ("Name='{0}'" -f $nameForFilter) -ErrorAction Stop | Select-Object -First 1
+    if ($printerCim) {
+      $setDefaultResult = Invoke-CimMethod -InputObject $printerCim -MethodName SetDefaultPrinter -ErrorAction Stop
+      $returnCode = [int]$setDefaultResult.ReturnValue
+      Write-Log ("Default printer CIM set attempt returned code={0} for Name='{1}'." -f $returnCode, $QueueName)
+      if ($returnCode -eq 0) {
+        $defaultSet = $true
+      }
+    }
+  }
+  catch {
+    $msg = $_.Exception.Message
+    Write-Log ("Default printer CIM set failed for '{0}': {1}" -f $QueueName, $msg) "WARN"
+    if ($msg -match "0x000003f0|token does not exist") {
+      Write-Log "Default printer CIM set failure appears token-related (0x000003f0)." "WARN"
+    }
+  }
+
+  if (-not $defaultSet) {
+    try {
+      $rundll32 = Join-Path $env:WINDIR "System32\rundll32.exe"
+      $args = 'printui.dll,PrintUIEntry /y /n "{0}"' -f ($QueueName -replace '"', '""')
+      $proc = Start-Process -FilePath $rundll32 -ArgumentList $args -PassThru -Wait -ErrorAction Stop
+      Write-Log ("Default printer printui fallback exit code={0} for Name='{1}'." -f $proc.ExitCode, $QueueName)
+      if ($proc.ExitCode -eq 0) {
+        $defaultSet = $true
+      }
+    }
+    catch {
+      Write-Log ("Default printer printui fallback failed for '{0}': {1}" -f $QueueName, $_.Exception.Message) "WARN"
+    }
+  }
+
+  try {
+    $nameForFilter = $QueueName.Replace("'", "''")
+    $verify = Get-CimInstance -ClassName Win32_Printer -Filter ("Name='{0}'" -f $nameForFilter) -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($verify -and [bool]$verify.Default) {
+      Write-Log ("Postcondition: default printer is Name='{0}'." -f $QueueName)
+      return
+    }
+  }
+  catch {
+    Write-Log ("Default printer verification failed for '{0}': {1}" -f $QueueName, $_.Exception.Message) "WARN"
+  }
+
+  if (-not $defaultSet) {
+    Write-Log ("Default printer could not be confirmed for Name='{0}'. Continuing install." -f $QueueName) "WARN"
+  }
+  else {
+    Write-Log ("Default printer set attempted for Name='{0}' but postcondition did not confirm it." -f $QueueName) "WARN"
+  }
+}
+
 try {
   if ([string]::IsNullOrWhiteSpace($PrinterName)) {
     $PrinterName = "Brother MFC-L9570CDW ($PrinterIP)"
@@ -750,7 +856,7 @@ try {
   if ($RetryPendingOnly) { $mode = "RetryPendingOnly" }
   Write-Log ("Mode: {0}" -f $mode)
   Write-Log ("PS host: Edition={0}, Version={1}, Home={2}" -f $PSVersionTable.PSEdition, $PSVersionTable.PSVersion, $PSHOME)
-  Write-Log ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', ValidateOnly={3}, SkipSignatureCheck={4}, NoTestPage={5}, RetryPendingOnly={6}" -f $PrinterIP, $PrinterName, $DriverUrl, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $RetryPendingOnly)
+  Write-Log ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', ValidateOnly={3}, SkipSignatureCheck={4}, NoTestPage={5}, NoSetDefaultPrinter={6}, RetryPendingOnly={7}" -f $PrinterIP, $PrinterName, $DriverUrl, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NoSetDefaultPrinter, $RetryPendingOnly)
   Write-Log ("Driver cache artifacts: DriverExePath='{0}', DriverHashPath='{1}'" -f $DriverExePath, $DriverHashPath)
 
   if (-not $RetryPendingOnly -and -not ($PrinterIP -match '^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$')) {
@@ -834,14 +940,7 @@ try {
   if (-not $port) { Fail ("Postcondition failed: port '{0}' not found." -f $PrinterIP) }
   Write-Log ("Postcondition: Get-PrinterPort Name='{0}', HostAddress='{1}'" -f $port.Name, $port.PrinterHostAddress)
 
-  $printer = Get-Printer -Name $PrinterName -ErrorAction SilentlyContinue
-  if (-not $printer) {
-    Write-Log ("Stage: creating printer '{0}' with model '{1}'" -f $PrinterName, $ExpectedPrintUiModel)
-    & printui.exe /if /b "$PrinterName" /f "$infPath" /r "$PrinterIP" /m "$ExpectedPrintUiModel"
-    Write-Log ("printui exit code: {0}" -f $LASTEXITCODE)
-  } else {
-    Write-Log ("Stage: printer '{0}' already exists." -f $PrinterName)
-  }
+  Ensure-PrinterQueueExists -QueueName $PrinterName -DriverName $ExpectedPrintUiModel -PortName $PrinterIP -InfPath $infPath
 
   $printer = $null
   for ($i = 1; $i -le 15; $i++) {
@@ -872,10 +971,12 @@ try {
     Fail "Postcondition failed: RAW 9100 / SNMP OFF registry values are incorrect."
   }
 
+  Set-DefaultPrinterBestEffort -QueueName $PrinterName
+
   if (-not $NoTestPage) {
     Process-PendingTestPageRequests
 
-    $tpResult = Invoke-TestPageWithEvidence -QueueName $PrinterName -InvokeAttempts 3 -ObserveSeconds 20
+    $tpResult = Invoke-TestPageWithEvidence -QueueName $PrinterName -InvokeAttempts $TestPageInvokeAttemptsInstall -ObserveSeconds $TestPageObserveSeconds
     if ($tpResult.Success) {
       Write-Log "Test page postcondition: queue job observed."
       Write-Log "Test page evidence confirms queue submission only; physical paper output is device-dependent."
@@ -891,8 +992,10 @@ try {
       Update-PendingRetryTaskState
     }
     else {
-      Write-Log ("Test page postcondition: no queue job evidence. Reason='{0}'" -f $tpResult.Reason) "WARN"
-      Add-PendingTestPageRequest -QueueName $PrinterName -QueueIp $PrinterIP -Reason $tpResult.Reason
+      $reason = ("No queue job evidence after test page invocation. Reason='{0}'" -f $tpResult.Reason)
+      Write-Log ("Test page postcondition failed: {0}" -f $reason) "ERROR"
+      Add-PendingTestPageRequest -QueueName $PrinterName -QueueIp $PrinterIP -Reason $reason
+      $degradedReasons += $reason
       Update-PendingRetryTaskState
     }
   }

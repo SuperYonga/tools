@@ -45,6 +45,11 @@ Install using custom IP + driver URL:
 INSTALL.bat -PrinterIP 192.168.0.120 -DriverUrl "https://download.brother.com/welcome/dlf106550/Y16E_C1-hostm-K1.EXE"
 ```
 
+Enable diagnostic email/draft on successful runs too (dev/internal):
+```bat
+INSTALL.bat -NotifyAlways
+```
+
 Validation-only (no changes made):
 ```bat
 INSTALL.bat -ValidateOnly
@@ -53,6 +58,11 @@ INSTALL.bat -ValidateOnly
 Validation-only with custom IP:
 ```bat
 INSTALL.bat -PrinterIP 192.168.0.120 -ValidateOnly
+```
+
+Skip setting configured queue as default printer:
+```bat
+INSTALL.bat -NoSetDefaultPrinter
 ```
 
 ## Logging
@@ -72,7 +82,9 @@ The log contains BAT + PowerShell output, including:
 - reachability diagnostics with timeout + elapsed milliseconds
 - explicit warning if TCP/9100 is unreachable
 - degraded verification handling: if test-page evidence is queue-only while TCP/9100 is unreachable, installer exits non-zero to trigger failure comms and queues retry
+- degraded verification handling: if no test-page queue evidence is observed, installer exits non-zero, queues retry, and triggers failure comms
 - PrintService(Admin) "no events found" recorded as informational evidence, not failure
+- default-printer set attempt and postcondition evidence for the configured queue (unless `-NoSetDefaultPrinter` is specified)
 
 ## Runtime visibility and window behavior
 - The launcher shows a live terminal spinner while waiting for installer completion.
@@ -85,6 +97,9 @@ The log contains BAT + PowerShell output, including:
 On failure (non-zero exit or launcher exception), the launcher performs a single failure email action per run:
 - If SMTP is configured, SMTP send is attempted first.
 - If SMTP send is not configured or fails, a prefilled default mail-client draft is opened instead.
+
+Optional diagnostics mode:
+- `-NotifyAlways` (or environment `SC_NOTIFY_ALWAYS=1`) also sends a success diagnostic email/draft on exit code `0`.
 
 Optional recipient override:
 - `-NotifyTo "henry@supercivil.com.au"` (default is already `henry@supercivil.com.au`)
@@ -131,7 +146,7 @@ Default output location:
 
 ## Exit behavior
 - Exit code `0` = success
-- Exit code `2` = degraded verification (queue-only test-page evidence while printer endpoint was unreachable); launcher treats this as failure for comms
+- Exit code `2` = degraded verification (test-page verification failed or queue-only evidence while endpoint was unreachable); launcher treats this as failure for comms
 - Non-zero exit = failed (see log for root cause)
 
 ## Notes
@@ -141,7 +156,7 @@ Default output location:
 - `INSTALL.bat` pauses on non-zero exit by default.
 - Set `SC_PAUSE=1` to always pause at the end.
 - Test-page request handling is automatic:
-  - The installer invokes the test page without user input.
+  - The installer sends one test-page invocation per run (to avoid duplicate paper output) and then observes queue/event evidence.
   - If no queued job evidence is observed, the request is persisted to `C:\ProgramData\SuperCivil\PrinterInstall\pending-test-pages.json`.
   - A scheduled task (`SuperCivil-PrinterTestPageRetry`) retries pending requests every 5 minutes and removes itself when the queue is empty.
 
