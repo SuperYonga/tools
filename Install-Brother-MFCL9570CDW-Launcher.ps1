@@ -157,7 +157,8 @@ function Prepare-OutlookFailureDraft {
   }
 
   $subject = ("[Printer Installer] Failure on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
-  $body = @(
+  $logTail = Get-RecentLogLines -MaxLines 120
+  $fullBody = @(
     ("Time (UTC): {0}" -f (Get-Date).ToUniversalTime().ToString("o"))
     ("Computer: {0}" -f $env:COMPUTERNAME)
     ("User: {0}" -f [Environment]::UserName)
@@ -165,7 +166,8 @@ function Prepare-OutlookFailureDraft {
     ("Failure: {0}" -f $FailureMessage)
     ("LogPath: {0}" -f $script:LogPath)
     ""
-    "If attachment is missing, attach LogPath file manually and send."
+    "Recent log lines:"
+    $logTail
   ) -join [Environment]::NewLine
 
   $draftMode = "default"
@@ -175,15 +177,26 @@ function Prepare-OutlookFailureDraft {
 
   if ($draftMode -ne "outlookcom") {
     try {
+      $mailtoMaxBodyChars = 4500
+      if (-not [string]::IsNullOrWhiteSpace($env:SC_MAILTO_MAX_BODY_CHARS)) {
+        $parsedMax = 0
+        if ([int]::TryParse($env:SC_MAILTO_MAX_BODY_CHARS, [ref]$parsedMax) -and $parsedMax -gt 512) {
+          $mailtoMaxBodyChars = $parsedMax
+        }
+      }
+
+      $mailtoBody = $fullBody
+      if ($mailtoBody.Length -gt $mailtoMaxBodyChars) {
+        $mailtoBody = $mailtoBody.Substring(0, $mailtoMaxBodyChars) + [Environment]::NewLine + "[TRUNCATED] Open log file for full details."
+        Write-LauncherLog ("Mailto body truncated to {0} chars. Set SC_MAILTO_MAX_BODY_CHARS higher if needed." -f $mailtoMaxBodyChars) "WARN"
+      }
+
       $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
         [Uri]::EscapeDataString($NotifyTo),
         [Uri]::EscapeDataString($subject),
-        [Uri]::EscapeDataString($body))
+        [Uri]::EscapeDataString($mailtoBody))
       Start-Process $mailToUri | Out-Null
       Write-LauncherLog ("Default mail client draft opened for '{0}' (mode=default)." -f $NotifyTo)
-      if (-not [string]::IsNullOrWhiteSpace($script:LogPath) -and (Test-Path $script:LogPath)) {
-        Write-LauncherLog ("Default mailto draft cannot auto-attach files reliably. Attach this log manually: {0}" -f $script:LogPath) "WARN"
-      }
       return
     }
     catch {
@@ -196,7 +209,7 @@ function Prepare-OutlookFailureDraft {
     $mail = $outlook.CreateItem(0)
     $mail.To = $NotifyTo
     $mail.Subject = $subject
-    $mail.Body = $body
+    $mail.Body = $fullBody
     if (-not [string]::IsNullOrWhiteSpace($script:LogPath) -and (Test-Path $script:LogPath)) {
       $mail.Attachments.Add($script:LogPath) | Out-Null
     }

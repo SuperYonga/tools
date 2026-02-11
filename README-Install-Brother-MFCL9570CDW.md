@@ -110,8 +110,9 @@ Draft mode:
 Behavior:
 - On failure, it creates an Outlook mail item addressed to `henry@supercivil.com.au` (or `-NotifyTo` override).
 - Subject is prefilled with host + exit code.
-- Body includes failure context and log path.
-- In default `mailto` mode, attachment cannot be reliably auto-added by Windows standards; attach the logged file path manually.
+- Body includes failure context and recent log lines.
+- In default `mailto` mode, body length is capped (default `4500` chars) to keep URI launch reliable.
+- Optional override: `SC_MAILTO_MAX_BODY_CHARS` (must be >512).
 - In `outlookcom` mode, the current log file is attached automatically.
 
 ## Release packaging
