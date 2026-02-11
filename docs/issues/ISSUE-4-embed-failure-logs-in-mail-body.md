@@ -2,49 +2,52 @@
 
 - Branch: `issue-4-embed-failure-logs-in-mail-body`
 - Date: 2026-02-11
-- Status: DONE (local)
+- Status: DONE (local, awaiting remote push)
 
 ## Presenting Issue
-- Default-mail-client draft mode (`mailto:`) cannot reliably attach files across Windows mail handlers.
-- Priority is reliable delivery of failure logs.
+- Failure notifications included diagnostics but minimal responder guidance.
+- Request: add concise "User Action Required" instructions to both SMTP and mail-draft bodies.
 
 ## Past History
-- Issue 3 switched to default mail client first, with Outlook COM fallback.
-- Failure draft body previously had metadata only, with logs mainly as attachment/path.
+- Issue 2 introduced SMTP failure notifications.
+- Issue 3 added default mail-client draft + Outlook COM fallback.
+- Earlier issue 4 work embedded log tails and added mailto truncation control.
 
 ## Subjective Assessment
-- To maximize reliability, logs must be embedded directly into draft body.
+- Hard-failure detection is robust.
+- Degraded outcome handling improves materially when notification bodies include explicit next steps.
 
 ## Objective Assessment (Testing + Source Review)
-- Updated launcher default draft body to include recent log lines.
-- Added mailto-safe truncation guard with explicit warning logging.
-- Updated regression test to assert truncation behavior.
-- Ran `npm test`: Passed 15, Failed 0.
+- Added a shared body composer in launcher and routed both notification paths through it.
+- Added regression assertions for required guidance markers.
+- Test run: `npm test` => `Passed: 16 Failed: 0`.
 
 ## Analysis
-- Gap in implementation: default draft lacked inline logs; attachment path still manual for many clients.
-- Best-practice fit: include actionable diagnostics directly in primary communication payload; constrain payload for transport limits.
+- Gap in current implementation was not detection, but human-operability in incident response.
+- Best-practice alignment: actionable messaging + inline diagnostics + URI-length constraints.
 
 ## Plan
-1. Embed recent logs in all failure draft bodies.
-2. Add length cap for `mailto:` URI reliability.
-3. Validate via regression tests and docs.
+1. Keep existing detection paths unchanged.
+2. Add user-action and auto-attempted blocks to failure body.
+3. Validate with regression tests.
 
 ## Intervention
 - `Install-Brother-MFCL9570CDW-Launcher.ps1`
-  - `Prepare-OutlookFailureDraft` now includes `Get-RecentLogLines -MaxLines 120` in message body.
-  - Added `SC_MAILTO_MAX_BODY_CHARS` control (default 4500, min validation >512).
-  - Added warning log when body is truncated.
+  - Added `New-FailureMessageBody`.
+  - Added guidance text:
+    - `User Action Required`
+    - `Auto-attempted`
+  - Reused helper for:
+    - `Send-FailureNotification`
+    - `Prepare-OutlookFailureDraft`
 - `tests/Installer.Regression.Tests.ps1`
-  - Mail-draft test now sets `SC_MAILTO_MAX_BODY_CHARS=700` and asserts truncation warning log appears.
-- `README-Install-Brother-MFCL9570CDW.md`
-  - Documented inline log behavior and body-length cap.
+  - Added test: `launcher failure notifications include a user action guidance block`.
 
 ## Evaluation
-- Command: `npm test`
-- Result: `Passed: 15 Failed: 0`
-- Evidence: `tests/artifacts/pester-results.xml`
+- Evidence:
+  - `tests/artifacts/pester-results.xml`
+  - Regression summary: `16 passed, 0 failed`.
 
 ## Review
-- DONE for requested scope.
-- Merge conflict check vs `origin/main` blocked: no `origin` remote and no local `main` branch in this clone.
+- DONE for this increment.
+- Merge conflict check against `origin/main` and GitHub issue comment update are blocked because no git remote is configured in this clone.

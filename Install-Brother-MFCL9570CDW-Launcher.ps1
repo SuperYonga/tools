@@ -66,6 +66,39 @@ function Get-RecentLogLines {
   }
 }
 
+function New-FailureMessageBody {
+  param(
+    [int]$ExitCode,
+    [string]$FailureMessage,
+    [string]$LogTail
+  )
+
+  if ([string]::IsNullOrWhiteSpace($LogTail)) {
+    $LogTail = "<No log excerpt available>"
+  }
+
+  return @(
+    ("Time (UTC): {0}" -f (Get-Date).ToUniversalTime().ToString("o"))
+    ("Computer: {0}" -f $env:COMPUTERNAME)
+    ("User: {0}" -f [Environment]::UserName)
+    ("ExitCode: {0}" -f $ExitCode)
+    ("Failure: {0}" -f $FailureMessage)
+    ("LogPath: {0}" -f $script:LogPath)
+    ""
+    "User Action Required:"
+    "1) Open the log file at LogPath and review the final ERROR/WARN entries."
+    "2) Re-run in validation mode: INSTALL.bat -ValidateOnly (or launcher -ValidateOnly)."
+    "3) If validation still fails, escalate with this message and the full log attached."
+    ""
+    "Auto-attempted:"
+    "- Installer launch/elevation orchestration"
+    "- Failure notification and/or mail draft generation (if enabled)"
+    ""
+    "Recent log lines:"
+    $LogTail
+  ) -join [Environment]::NewLine
+}
+
 function Send-FailureNotification {
   param(
     [int]$ExitCode,
@@ -104,17 +137,7 @@ function Send-FailureNotification {
 
   $subject = ("[Printer Installer] Failure on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
   $logTail = Get-RecentLogLines -MaxLines 120
-  $body = @(
-    ("Time (UTC): {0}" -f (Get-Date).ToUniversalTime().ToString("o"))
-    ("Computer: {0}" -f $env:COMPUTERNAME)
-    ("User: {0}" -f [Environment]::UserName)
-    ("ExitCode: {0}" -f $ExitCode)
-    ("Failure: {0}" -f $FailureMessage)
-    ("LogPath: {0}" -f $script:LogPath)
-    ""
-    "Recent log lines:"
-    $logTail
-  ) -join [Environment]::NewLine
+  $body = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogTail $logTail
 
   try {
     $mail = New-Object System.Net.Mail.MailMessage
@@ -158,17 +181,7 @@ function Prepare-OutlookFailureDraft {
 
   $subject = ("[Printer Installer] Failure on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
   $logTail = Get-RecentLogLines -MaxLines 120
-  $fullBody = @(
-    ("Time (UTC): {0}" -f (Get-Date).ToUniversalTime().ToString("o"))
-    ("Computer: {0}" -f $env:COMPUTERNAME)
-    ("User: {0}" -f [Environment]::UserName)
-    ("ExitCode: {0}" -f $ExitCode)
-    ("Failure: {0}" -f $FailureMessage)
-    ("LogPath: {0}" -f $script:LogPath)
-    ""
-    "Recent log lines:"
-    $logTail
-  ) -join [Environment]::NewLine
+  $fullBody = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogTail $logTail
 
   $draftMode = "default"
   if (-not [string]::IsNullOrWhiteSpace($env:SC_MAIL_DRAFT_MODE)) {

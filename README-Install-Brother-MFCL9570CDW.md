@@ -94,6 +94,7 @@ Email content includes:
 - host/user/time
 - exit code + failure reason
 - log path
+- `User Action Required` next-step checklist
 - recent log tail (last 120 lines)
 
 ## Outlook draft on failure (optional, Windows desktop)
@@ -110,7 +111,7 @@ Draft mode:
 Behavior:
 - On failure, it creates an Outlook mail item addressed to `henry@supercivil.com.au` (or `-NotifyTo` override).
 - Subject is prefilled with host + exit code.
-- Body includes failure context and recent log lines.
+- Body includes failure context, `User Action Required` steps, and recent log lines.
 - In default `mailto` mode, body length is capped (default `4500` chars) to keep URI launch reliable.
 - Optional override: `SC_MAILTO_MAX_BODY_CHARS` (must be >512).
 - In `outlookcom` mode, the current log file is attached automatically.

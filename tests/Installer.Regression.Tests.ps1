@@ -122,6 +122,14 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match 'Join-Path \(Join-Path \$scriptDir "logs"\)') | Should Be $true
   }
 
+  It "launcher failure notifications include a user action guidance block" {
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+    ($launcherContent -match "function New-FailureMessageBody") | Should Be $true
+    ($launcherContent -match "User Action Required:") | Should Be $true
+    ($launcherContent -match "Auto-attempted:") | Should Be $true
+    ($launcherContent -match "INSTALL\.bat -ValidateOnly") | Should Be $true
+  }
+
   It "launcher failure notification path logs skip when SMTP is not configured" {
     $logPath = New-TestLogPath -Prefix "launcher-notify-failure"
     $oldNotify = $env:SC_NOTIFY_ON_FAILURE
