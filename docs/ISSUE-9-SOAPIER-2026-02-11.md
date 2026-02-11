@@ -62,7 +62,8 @@
 
 ## Review
 - Issue scope complete locally.
-- `origin/main` conflict status and GitHub issue sync cannot be validated in this clone because no git remote is configured.
+- Branch pushed to `origin/issue-9-full-log-body-on-email-trigger`.
+- `origin/main` conflict status cannot be meaningfully validated because histories are unrelated (`git merge-tree` reported unrelated histories).
 
 ## Git Hygiene
 - Branch created for this session: `issue-9-full-log-body-on-email-trigger`.

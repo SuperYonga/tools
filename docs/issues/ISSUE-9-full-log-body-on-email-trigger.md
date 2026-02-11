@@ -80,4 +80,5 @@ References:
 
 ## Review
 - DONE for this issue scope.
-- Could not check conflict state against `origin/main` or open/update GitHub issue because this clone has no configured remote.
+- Branch pushed: `origin/issue-9-full-log-body-on-email-trigger`.
+- `origin/main` conflict check is not meaningful because this local repository history is unrelated to remote `origin/main` (`git merge-tree` refused due unrelated histories).
