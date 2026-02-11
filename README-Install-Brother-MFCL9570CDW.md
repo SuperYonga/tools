@@ -70,7 +70,8 @@ The log contains BAT + PowerShell output, including:
 - printer/port checks
 - postcondition pass/fail details
 - reachability diagnostics with timeout + elapsed milliseconds
-- explicit warning if TCP/9100 is unreachable (installer still continues for offline provisioning)
+- explicit warning if TCP/9100 is unreachable
+- degraded verification handling: if test-page evidence is queue-only while TCP/9100 is unreachable, installer exits non-zero to trigger failure comms and queues retry
 - PrintService(Admin) "no events found" recorded as informational evidence, not failure
 
 ## Runtime visibility and window behavior
@@ -130,6 +131,7 @@ Default output location:
 
 ## Exit behavior
 - Exit code `0` = success
+- Exit code `2` = degraded verification (queue-only test-page evidence while printer endpoint was unreachable); launcher treats this as failure for comms
 - Non-zero exit = failed (see log for root cause)
 
 ## Notes

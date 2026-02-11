@@ -774,10 +774,12 @@ try {
     Fail "Install path requires Windows PowerShell 5.1 (Desktop edition)."
   }
 
+  $degradedReasons = @()
   Write-Log ("Stage: probing reachability to {0}:9100 with timeout={1}ms" -f $PrinterIP, $ReachabilityTimeoutMs)
   $reach = Test-Tcp9100 -Ip $PrinterIP -TimeoutMs $ReachabilityTimeoutMs
   Write-Log ("Reachability to {0}:9100 via {1} => {2} (elapsed={3}ms)" -f $PrinterIP, $reach.Method, $reach.Reachable, $reach.ElapsedMs)
-  if (-not $reach.Reachable) {
+  $printerReachable = [bool]$reach.Reachable
+  if (-not $printerReachable) {
     Write-Log ("Reachability warning: {0}:9100 was not reachable. Continuing install for offline provisioning; verify printer power/network if test page evidence is absent." -f $PrinterIP) "WARN"
   }
 
@@ -875,7 +877,15 @@ try {
     if ($tpResult.Success) {
       Write-Log "Test page postcondition: queue job observed."
       Write-Log "Test page evidence confirms queue submission only; physical paper output is device-dependent."
-      Remove-PendingTestPageRequest -QueueName $PrinterName -QueueIp $PrinterIP
+      if ($printerReachable) {
+        Remove-PendingTestPageRequest -QueueName $PrinterName -QueueIp $PrinterIP
+      }
+      else {
+        $reason = "Queue job observed but printer endpoint was unreachable during install."
+        Write-Log ("Test page verification degraded: {0}" -f $reason) "ERROR"
+        Add-PendingTestPageRequest -QueueName $PrinterName -QueueIp $PrinterIP -Reason $reason
+        $degradedReasons += $reason
+      }
       Update-PendingRetryTaskState
     }
     else {
@@ -886,6 +896,12 @@ try {
   }
   else {
     Write-Log "NoTestPage specified. Skipping test page invocation."
+  }
+
+  if ($degradedReasons.Count -gt 0) {
+    $joinedReasons = ($degradedReasons | Select-Object -Unique) -join " | "
+    Write-Log ("Install completed with degraded verification. Exiting non-zero to trigger failure comms. Reasons='{0}'" -f $joinedReasons) "ERROR"
+    exit 2
   }
 
   Write-Log "Install completed successfully."

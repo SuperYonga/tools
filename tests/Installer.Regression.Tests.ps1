@@ -126,11 +126,16 @@ Describe "Brother installer regression tests" {
   It "installer reachability logging includes timeout and elapsed evidence in install and retry paths" {
     $installerContent = Get-Content -Path $installerPs1 -Raw
     ($installerContent -match '\$ReachabilityTimeoutMs\s*=\s*2500') | Should Be $true
+    ($installerContent -match '\$degradedReasons\s*=\s*@\(\)') | Should Be $true
+    ($installerContent -match '\$printerReachable\s*=\s*\[bool\]\$reach\.Reachable') | Should Be $true
     ($installerContent -match 'Stage: probing reachability to \{0\}:9100 with timeout=\{1\}ms') | Should Be $true
     ($installerContent -match 'Pending request stage: probing reachability to \{0\}:9100 with timeout=\{1\}ms') | Should Be $true
     ($installerContent -match 'Reachability to \{0\}:9100 via \{1\} => \{2\} \(elapsed=\{3\}ms\)') | Should Be $true
     ($installerContent -match 'Pending request reachability \{0\}:9100 via \{1\} => \{2\} \(elapsed=\{3\}ms\)') | Should Be $true
     ($installerContent -match 'Reachability warning: \{0\}:9100 was not reachable\. Continuing install for offline provisioning; verify printer power/network if test page evidence is absent\.') | Should Be $true
+    ($installerContent -match "Test page verification degraded: \{0\}") | Should Be $true
+    ($installerContent -match "Install completed with degraded verification\. Exiting non-zero to trigger failure comms\. Reasons='\{0\}'") | Should Be $true
+    ($installerContent -match "exit 2") | Should Be $true
   }
 
   It "installer treats no matching PrintService admin events as informational evidence" {
