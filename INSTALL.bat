@@ -17,5 +17,6 @@ if not exist "%LAUNCHER%" (
 "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%LAUNCHER%" %*
 set "RC=%errorlevel%"
 
+if /I "%SC_PAUSE_ON_FAILURE%"=="1" if not "%RC%"=="0" pause
 if defined SC_PAUSE pause
 exit /b %RC%

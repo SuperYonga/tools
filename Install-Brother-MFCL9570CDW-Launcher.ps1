@@ -49,6 +49,63 @@ function Quote-Arg {
   return '"' + ($Value -replace '"', '\"') + '"'
 }
 
+function Get-InstallerPowerShellPath {
+  $powershellExe = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+  if (-not (Test-Path $powershellExe)) { $powershellExe = "powershell.exe" }
+  return $powershellExe
+}
+
+function New-InstallerArgumentLine {
+  $childArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy Bypass",
+    "-File " + (Quote-Arg -Value $installerPs1),
+    "-LogPath " + (Quote-Arg -Value $script:LogPath)
+  )
+  if ($ValidateOnly) { $childArgs += "-ValidateOnly" }
+  if ($SkipSignatureCheck) { $childArgs += "-SkipSignatureCheck" }
+  if ($NoTestPage) { $childArgs += "-NoTestPage" }
+  if (-not [string]::IsNullOrWhiteSpace($PrinterIP)) { $childArgs += "-PrinterIP " + (Quote-Arg -Value $PrinterIP) }
+  if (-not [string]::IsNullOrWhiteSpace($PrinterName)) { $childArgs += "-PrinterName " + (Quote-Arg -Value $PrinterName) }
+  if (-not [string]::IsNullOrWhiteSpace($DriverUrl)) { $childArgs += "-DriverUrl " + (Quote-Arg -Value $DriverUrl) }
+  return ($childArgs -join " ")
+}
+
+function Wait-InstallerProcess {
+  param(
+    [Parameter(Mandatory = $true)]
+    [System.Diagnostics.Process]$Process,
+    [string]$Activity = "Installer is running"
+  )
+
+  $spinnerEnabled = -not [Console]::IsOutputRedirected
+  if (-not [string]::IsNullOrWhiteSpace($env:SC_SHOW_PROGRESS) -and $env:SC_SHOW_PROGRESS -eq "0") {
+    $spinnerEnabled = $false
+  }
+
+  $frames = @("|", "/", "-", "\")
+  $frameIndex = 0
+  $start = Get-Date
+  $lastHeartbeatSec = -1
+
+  while (-not $Process.WaitForExit(250)) {
+    $elapsedSec = [int]((Get-Date) - $start).TotalSeconds
+    if ($spinnerEnabled) {
+      $frame = $frames[$frameIndex % $frames.Count]
+      $frameIndex++
+      Write-Host -NoNewline ("`r[{0}] {1} ({2}s elapsed)" -f $frame, $Activity, $elapsedSec)
+    }
+    if ($elapsedSec -gt 0 -and ($elapsedSec % 15) -eq 0 -and $elapsedSec -ne $lastHeartbeatSec) {
+      Write-LauncherLog ("Still waiting for process PID={0} ({1}s elapsed)." -f $Process.Id, $elapsedSec)
+      $lastHeartbeatSec = $elapsedSec
+    }
+  }
+
+  if ($spinnerEnabled) {
+    Write-Host ("`r[OK] {0} (completed in {1}s){2}" -f $Activity, [int]((Get-Date) - $start).TotalSeconds, (' ' * 20))
+  }
+}
+
 function Get-RecentLogLines {
   param([int]$MaxLines = 120)
   if ([string]::IsNullOrWhiteSpace($script:LogPath) -or -not (Test-Path $script:LogPath)) {
@@ -268,38 +325,16 @@ Write-LauncherLog ("Admin status: {0}" -f $isAdmin)
 
 if (-not $isAdmin -and -not $ValidateOnly) {
   Write-LauncherLog "Elevation required. Launching elevated installer and waiting."
-
-  $powershellExe = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
-  if (-not (Test-Path $powershellExe)) { $powershellExe = "powershell.exe" }
-
-  $childArgs = @(
-    "-NoProfile",
-    "-ExecutionPolicy Bypass",
-    "-File " + (Quote-Arg -Value $installerPs1),
-    "-LogPath " + (Quote-Arg -Value $script:LogPath)
-  )
-  if ($ValidateOnly) { $childArgs += "-ValidateOnly" }
-  if ($SkipSignatureCheck) { $childArgs += "-SkipSignatureCheck" }
-  if ($NoTestPage) { $childArgs += "-NoTestPage" }
-  if (-not [string]::IsNullOrWhiteSpace($PrinterIP)) { $childArgs += "-PrinterIP " + (Quote-Arg -Value $PrinterIP) }
-  if (-not [string]::IsNullOrWhiteSpace($PrinterName)) { $childArgs += "-PrinterName " + (Quote-Arg -Value $PrinterName) }
-  if (-not [string]::IsNullOrWhiteSpace($DriverUrl)) { $childArgs += "-DriverUrl " + (Quote-Arg -Value $DriverUrl) }
-
-  $argLine = ($childArgs -join " ")
+  $powershellExe = Get-InstallerPowerShellPath
+  $argLine = New-InstallerArgumentLine
   Write-LauncherLog ("Elevated target: {0}" -f $installerPs1)
   Write-LauncherLog ("Elevated arg line: {0}" -f $argLine)
 
   try {
     $p = Start-Process -FilePath $powershellExe -ArgumentList $argLine -Verb RunAs -PassThru
     Write-LauncherLog ("Elevated PID={0}" -f $p.Id)
-    Write-LauncherLog "Waiting for elevated process to complete..."
-    $waitStart = Get-Date
-    while (-not $p.WaitForExit(1000)) {
-      $elapsedSec = [int]((Get-Date) - $waitStart).TotalSeconds
-      if ($elapsedSec -gt 0 -and ($elapsedSec % 15) -eq 0) {
-        Write-LauncherLog ("Still waiting for elevated process PID={0} ({1}s elapsed)." -f $p.Id, $elapsedSec)
-      }
-    }
+    Write-LauncherLog "Waiting for elevated process to complete."
+    Wait-InstallerProcess -Process $p -Activity "Elevated installer is running"
     Write-LauncherLog ("Elevated process exit code={0}" -f $p.ExitCode)
     if ($p.ExitCode -ne 0) {
       Write-LauncherLog "Elevated process failed. Check installer logs after the last LAUNCHER line for root cause." "ERROR"
@@ -318,10 +353,14 @@ if (-not $isAdmin -and -not $ValidateOnly) {
 }
 
 try {
-  Write-LauncherLog "Invoking installer script."
-  $invokeArgs = New-InstallerInvokeArgs
-  & $installerPs1 @invokeArgs
-  $rc = $LASTEXITCODE
+  $powershellExe = Get-InstallerPowerShellPath
+  $argLine = New-InstallerArgumentLine
+  Write-LauncherLog ("Installer process target: {0}" -f $installerPs1)
+  Write-LauncherLog ("Installer process arg line: {0}" -f $argLine)
+  $p = Start-Process -FilePath $powershellExe -ArgumentList $argLine -PassThru
+  Write-LauncherLog ("Installer PID={0}" -f $p.Id)
+  Wait-InstallerProcess -Process $p -Activity "Installer is running"
+  $rc = $p.ExitCode
   Write-LauncherLog ("Installer exit code={0}" -f $rc)
   if ($rc -ne 0) {
     Prepare-OutlookFailureDraft -ExitCode $rc -FailureMessage "Installer exited non-zero."

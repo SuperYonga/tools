@@ -105,6 +105,7 @@ Describe "Brother installer regression tests" {
   It "launcher batch is non-interactive by default" {
     $content = Get-Content -Path $installBat -Raw
     ($content -match "if defined SC_PAUSE pause") | Should Be $true
+    ($content -match "SC_PAUSE_ON_FAILURE") | Should Be $true
     ($content -match "SC_NO_PAUSE") | Should Be $false
   }
 
@@ -128,6 +129,13 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "User Action Required:") | Should Be $true
     ($launcherContent -match "Auto-attempted:") | Should Be $true
     ($launcherContent -match "INSTALL\.bat -ValidateOnly") | Should Be $true
+  }
+
+  It "launcher exposes progress wait helper for long-running installer execution" {
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+    ($launcherContent -match "function Wait-InstallerProcess") | Should Be $true
+    ($launcherContent -match "SC_SHOW_PROGRESS") | Should Be $true
+    ($launcherContent -match "Still waiting for process PID=") | Should Be $true
   }
 
   It "launcher failure notification path logs skip when SMTP is not configured" {

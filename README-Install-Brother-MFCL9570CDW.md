@@ -70,6 +70,13 @@ The log contains BAT + PowerShell output, including:
 - printer/port checks
 - postcondition pass/fail details
 
+## Runtime visibility and window behavior
+- The launcher shows a live terminal spinner while waiting for installer completion.
+- Every 15 seconds it also writes a heartbeat line to the log (`Still waiting for process PID=...`).
+- Disable spinner output with `SC_SHOW_PROGRESS=0` (heartbeats remain in logs).
+- Keep `cmd` open only on failures: set `SC_PAUSE_ON_FAILURE=1`.
+- Keep `cmd` open for every run: set `SC_PAUSE=1`.
+
 ## Failure email notification (optional)
 The launcher can send an email when a run fails (non-zero exit or launcher exception).
 
@@ -134,7 +141,9 @@ Default output location:
 - Install mode requires Administrator privileges.
 - ValidateOnly mode does not install or change printer state.
 - Keep `INSTALL.bat`, `Install-Brother-MFCL9570CDW-Launcher.ps1`, and `Install-Brother-MFCL9570CDW.ps1` in the same folder.
-- `INSTALL.bat` is non-interactive by default (no auto-pause). Set env var `SC_PAUSE=1` before launch if you want it to pause at the end.
+- `INSTALL.bat` is non-interactive by default (no auto-pause).
+- Set `SC_PAUSE_ON_FAILURE=1` to pause only when exit code is non-zero.
+- Set `SC_PAUSE=1` to always pause at the end.
 - Test-page request handling is automatic:
   - The installer invokes the test page without user input.
   - If no queued job evidence is observed, the request is persisted to `C:\ProgramData\SuperCivil\PrinterInstall\pending-test-pages.json`.
