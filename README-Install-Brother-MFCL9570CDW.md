@@ -98,20 +98,21 @@ Email content includes:
 - exit code + failure reason
 - log path
 - `User Action Required` next-step checklist
-- recent log tail (last 120 lines)
+- full log content from the run
 
 ## Outlook draft on failure (Windows desktop)
 The launcher always attempts to open a prefilled draft in the default Windows mail client on failure (including whichever Outlook profile/app is currently configured).
 
 Draft mode:
-- Default: uses system default mail client via `mailto:` (best for "use whatever is already set up")
-- Optional fallback mode: set `SC_MAIL_DRAFT_MODE=outlookcom` to force classic Outlook COM draft behavior
+- Default: uses system default mail client first (`default`) so the currently configured Outlook/mail app is respected
+- Fallback: uses Outlook COM (`outlookcom`) when default-client launch fails
+- Optional override: set `SC_MAIL_DRAFT_MODE=outlookcom` to force classic Outlook COM first
 
 Behavior:
 - On failure, it creates an Outlook mail item addressed to `henry@supercivil.com.au` (or `-NotifyTo` override).
 - Subject is prefilled with host + exit code.
-- Body includes failure context, `User Action Required` steps, and recent log lines.
-- In default `mailto` mode, body length is capped (default `4500` chars) to keep URI launch reliable.
+- Body includes failure context, `User Action Required` steps, and full log content.
+- In `mailto` mode, body length is capped (default `4500` chars) to keep URI launch reliable.
 - Optional override: `SC_MAILTO_MAX_BODY_CHARS` (must be >512).
 - In `outlookcom` mode, the current log file is attached automatically.
 

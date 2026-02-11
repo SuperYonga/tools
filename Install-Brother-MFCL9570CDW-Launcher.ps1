@@ -106,13 +106,21 @@ function Wait-InstallerProcess {
   }
 }
 
-function Get-RecentLogLines {
-  param([int]$MaxLines = 120)
+function Get-LogContent {
+  param(
+    [int]$MaxLines = 120,
+    [switch]$Full
+  )
   if ([string]::IsNullOrWhiteSpace($script:LogPath) -or -not (Test-Path $script:LogPath)) {
     return "<No log file available>"
   }
   try {
-    $lines = Get-Content -Path $script:LogPath -Tail $MaxLines -ErrorAction Stop
+    if ($Full) {
+      $lines = Get-Content -Path $script:LogPath -ErrorAction Stop
+    }
+    else {
+      $lines = Get-Content -Path $script:LogPath -Tail $MaxLines -ErrorAction Stop
+    }
     if (-not $lines) {
       return "<Log file exists but is empty>"
     }
@@ -127,11 +135,11 @@ function New-FailureMessageBody {
   param(
     [int]$ExitCode,
     [string]$FailureMessage,
-    [string]$LogTail
+    [string]$LogContent
   )
 
-  if ([string]::IsNullOrWhiteSpace($LogTail)) {
-    $LogTail = "<No log excerpt available>"
+  if ([string]::IsNullOrWhiteSpace($LogContent)) {
+    $LogContent = "<No log content available>"
   }
 
   return @(
@@ -149,10 +157,10 @@ function New-FailureMessageBody {
     ""
     "Auto-attempted:"
     "- Installer launch/elevation orchestration"
-    "- Failure notification and/or mail draft generation (if enabled)"
+    "- Failure notification and/or mail draft generation"
     ""
-    "Recent log lines:"
-    $LogTail
+    "Full log content:"
+    $LogContent
   ) -join [Environment]::NewLine
 }
 
@@ -188,8 +196,8 @@ function Send-FailureNotification {
   }
 
   $subject = ("[Printer Installer] Failure on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
-  $logTail = Get-RecentLogLines -MaxLines 120
-  $body = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogTail $logTail
+  $logContent = Get-LogContent -Full
+  $body = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogContent $logContent
 
   try {
     $mail = New-Object System.Net.Mail.MailMessage
@@ -227,8 +235,8 @@ function Prepare-OutlookFailureDraft {
   }
 
   $subject = ("[Printer Installer] Failure on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
-  $logTail = Get-RecentLogLines -MaxLines 120
-  $fullBody = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogTail $logTail
+  $logContent = Get-LogContent -Full
+  $fullBody = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogContent $logContent
 
   $draftMode = "default"
   if (-not [string]::IsNullOrWhiteSpace($env:SC_MAIL_DRAFT_MODE)) {
@@ -276,16 +284,51 @@ function Prepare-OutlookFailureDraft {
     $mail.Save()
     $mail.Display()
     Write-LauncherLog ("Outlook COM failure draft prepared for '{0}' (mode=outlookcom)." -f $NotifyTo)
-  }
-  catch {
-    Write-LauncherLog ("Outlook failure draft preparation failed: {0}" -f $_.Exception.Message) "WARN"
-  }
+    }
+    catch {
+      Write-LauncherLog ("Outlook failure draft preparation failed: {0}" -f $_.Exception.Message) "WARN"
+      try {
+        $mailtoMaxBodyChars = 4500
+        if (-not [string]::IsNullOrWhiteSpace($env:SC_MAILTO_MAX_BODY_CHARS)) {
+          $parsedMax = 0
+          if ([int]::TryParse($env:SC_MAILTO_MAX_BODY_CHARS, [ref]$parsedMax) -and $parsedMax -gt 512) {
+            $mailtoMaxBodyChars = $parsedMax
+          }
+        }
+
+        $mailtoBody = $fullBody
+        if ($mailtoBody.Length -gt $mailtoMaxBodyChars) {
+          $mailtoBody = $mailtoBody.Substring(0, $mailtoMaxBodyChars) + [Environment]::NewLine + "[TRUNCATED] Open log file for full details."
+          Write-LauncherLog ("Mailto body truncated to {0} chars. Set SC_MAILTO_MAX_BODY_CHARS higher if needed." -f $mailtoMaxBodyChars) "WARN"
+        }
+
+        $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
+          [Uri]::EscapeDataString($NotifyTo),
+          [Uri]::EscapeDataString($subject),
+          [Uri]::EscapeDataString($mailtoBody))
+        Start-Process $mailToUri | Out-Null
+        Write-LauncherLog ("Default mail client draft opened for '{0}' (fallback after Outlook COM failure)." -f $NotifyTo)
+      }
+      catch {
+        Write-LauncherLog ("Default mail client draft fallback also failed: {0}" -f $_.Exception.Message) "WARN"
+      }
+    }
+}
+
+function Invoke-FailureComms {
+  param(
+    [int]$ExitCode,
+    [string]$FailureMessage
+  )
+
+  Write-LauncherLog ("Failure handler triggered. ExitCode={0}, Reason='{1}'" -f $ExitCode, $FailureMessage) "ERROR"
+  Prepare-OutlookFailureDraft -ExitCode $ExitCode -FailureMessage $FailureMessage
+  Send-FailureNotification -ExitCode $ExitCode -FailureMessage $FailureMessage
 }
 
 if (-not (Test-Path $installerPs1)) {
   Write-Error "Missing installer script: $installerPs1"
-  Prepare-OutlookFailureDraft -ExitCode 1 -FailureMessage ("Missing installer script: {0}" -f $installerPs1)
-  Send-FailureNotification -ExitCode 1 -FailureMessage ("Missing installer script: {0}" -f $installerPs1)
+  Invoke-FailureComms -ExitCode 1 -FailureMessage ("Missing installer script: {0}" -f $installerPs1)
   exit 1
 }
 
@@ -303,7 +346,7 @@ Write-LauncherLog ("Installer path: {0}" -f $installerPs1)
 Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NotifyOnFailure={4}, PrepareOutlookMailOnFailure={5}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NotifyOnFailure, $PrepareOutlookMailOnFailure)
 Write-LauncherLog ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', LogPath='{3}'" -f $PrinterIP, $PrinterName, $DriverUrl, $script:LogPath)
 Write-LauncherLog ("Failure notification mode: always-on. NotifyTo='{0}'" -f $NotifyTo)
-Write-LauncherLog ("Outlook failure draft mode: always-on. NotifyTo='{0}'" -f $NotifyTo)
+Write-LauncherLog ("Outlook failure draft mode: always-on (default mode=default-client, fallback=outlookcom). NotifyTo='{0}'" -f $NotifyTo)
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -324,16 +367,14 @@ if (-not $isAdmin -and -not $ValidateOnly) {
     Write-LauncherLog ("Elevated process exit code={0}" -f $p.ExitCode)
     if ($p.ExitCode -ne 0) {
       Write-LauncherLog "Elevated process failed. Check installer logs after the last LAUNCHER line for root cause." "ERROR"
-      Prepare-OutlookFailureDraft -ExitCode $p.ExitCode -FailureMessage "Elevated installer process exited non-zero."
-      Send-FailureNotification -ExitCode $p.ExitCode -FailureMessage "Elevated installer process exited non-zero."
+      Invoke-FailureComms -ExitCode $p.ExitCode -FailureMessage "Elevated installer process exited non-zero."
     }
     Write-LauncherLog "Launcher exiting after elevated child."
     exit $p.ExitCode
   }
   catch {
     Write-LauncherLog ("Elevation launch failed: {0}" -f $_.Exception.Message) "ERROR"
-    Prepare-OutlookFailureDraft -ExitCode 1 -FailureMessage ("Elevation launch failed: {0}" -f $_.Exception.Message)
-    Send-FailureNotification -ExitCode 1 -FailureMessage ("Elevation launch failed: {0}" -f $_.Exception.Message)
+    Invoke-FailureComms -ExitCode 1 -FailureMessage ("Elevation launch failed: {0}" -f $_.Exception.Message)
     exit 1
   }
 }
@@ -349,8 +390,7 @@ try {
   $rc = $p.ExitCode
   Write-LauncherLog ("Installer exit code={0}" -f $rc)
   if ($rc -ne 0) {
-    Prepare-OutlookFailureDraft -ExitCode $rc -FailureMessage "Installer exited non-zero."
-    Send-FailureNotification -ExitCode $rc -FailureMessage "Installer exited non-zero."
+    Invoke-FailureComms -ExitCode $rc -FailureMessage "Installer exited non-zero."
   }
   Write-LauncherLog "Launcher complete."
   Write-Host ("Log file: {0}" -f $script:LogPath)
@@ -359,7 +399,6 @@ try {
 catch {
   Write-LauncherLog ("Launcher failure: {0}" -f $_.Exception.Message) "ERROR"
   Write-LauncherLog ("Stack: {0}" -f $_.ScriptStackTrace) "ERROR"
-  Prepare-OutlookFailureDraft -ExitCode 1 -FailureMessage ("Launcher failure: {0}" -f $_.Exception.Message)
-  Send-FailureNotification -ExitCode 1 -FailureMessage ("Launcher failure: {0}" -f $_.Exception.Message)
+  Invoke-FailureComms -ExitCode 1 -FailureMessage ("Launcher failure: {0}" -f $_.Exception.Message)
   exit 1
 }

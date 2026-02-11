@@ -129,6 +129,7 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "User Action Required:") | Should Be $true
     ($launcherContent -match "Auto-attempted:") | Should Be $true
     ($launcherContent -match "INSTALL\.bat -ValidateOnly") | Should Be $true
+    ($launcherContent -match "Full log content:") | Should Be $true
   }
 
   It "launcher exposes progress wait helper for long-running installer execution" {
@@ -136,6 +137,13 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "function Wait-InstallerProcess") | Should Be $true
     ($launcherContent -match "SC_SHOW_PROGRESS") | Should Be $true
     ($launcherContent -match "Still waiting for process PID=") | Should Be $true
+  }
+
+  It "launcher failure flow centralizes full-log failure comms" {
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+    ($launcherContent -match "function Invoke-FailureComms") | Should Be $true
+    ($launcherContent -match "Failure handler triggered") | Should Be $true
+    ($launcherContent -match "Get-LogContent -Full") | Should Be $true
   }
 
   It "launcher failure notification path logs skip when SMTP is not configured" {
@@ -151,6 +159,7 @@ Describe "Brother installer regression tests" {
       $result = Invoke-LauncherPs1 -Args @("-ValidateOnly","-PrinterIP","999.0.0.1") -LogPath $logPath
 
       $result.ExitCode | Should Not Be 0
+      ($result.LogText -match "Failure handler triggered") | Should Be $true
       ($result.LogText -match "Failure notification mode: always-on") | Should Be $true
       ($result.LogText -match "Failure notification requested but skipped") | Should Be $true
     }
@@ -169,9 +178,10 @@ Describe "Brother installer regression tests" {
       $result = Invoke-LauncherPs1 -Args @("-ValidateOnly","-PrinterIP","999.0.0.1") -LogPath $logPath
 
       $result.ExitCode | Should Not Be 0
-      ($result.LogText -match "Outlook failure draft mode: always-on") | Should Be $true
+      ($result.LogText -match "Failure handler triggered") | Should Be $true
+      ($result.LogText -match "Outlook failure draft mode: always-on \(default mode=default-client, fallback=outlookcom\)") | Should Be $true
       ($result.LogText -match "Mailto body truncated") | Should Be $true
-      ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Outlook COM failure draft prepared|Outlook failure draft preparation failed") | Should Be $true
+      ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Outlook COM failure draft prepared|Outlook failure draft preparation failed|Default mail client draft fallback also failed") | Should Be $true
     }
     finally {
       if ($null -eq $oldMailtoMaxBody) { Remove-Item Env:SC_MAILTO_MAX_BODY_CHARS -ErrorAction SilentlyContinue } else { $env:SC_MAILTO_MAX_BODY_CHARS = $oldMailtoMaxBody }
