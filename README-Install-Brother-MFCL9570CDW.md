@@ -69,6 +69,9 @@ The log contains BAT + PowerShell output, including:
 - driver staging status
 - printer/port checks
 - postcondition pass/fail details
+- reachability diagnostics with timeout + elapsed milliseconds
+- explicit warning if TCP/9100 is unreachable (installer still continues for offline provisioning)
+- PrintService(Admin) "no events found" recorded as informational evidence, not failure
 
 ## Runtime visibility and window behavior
 - The launcher shows a live terminal spinner while waiting for installer completion.

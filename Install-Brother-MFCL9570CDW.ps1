@@ -348,6 +348,12 @@ function Log-RecentPrintServiceEvents {
     }
   }
   catch {
+    $fqid = [string]$_.FullyQualifiedErrorId
+    $msg = [string]$_.Exception.Message
+    if ($fqid -like "*NoMatchingEventsFound*" -or $msg -match "No events were found") {
+      Write-Log ("PrintService(Admin) evidence: no matching events found since {0}." -f $Since.ToString("s"))
+      return
+    }
     Write-Log ("Could not read PrintService(Admin) log: {0}" -f $_.Exception.Message) "WARN"
   }
 }
@@ -771,6 +777,9 @@ try {
   Write-Log ("Stage: probing reachability to {0}:9100 with timeout={1}ms" -f $PrinterIP, $ReachabilityTimeoutMs)
   $reach = Test-Tcp9100 -Ip $PrinterIP -TimeoutMs $ReachabilityTimeoutMs
   Write-Log ("Reachability to {0}:9100 via {1} => {2} (elapsed={3}ms)" -f $PrinterIP, $reach.Method, $reach.Reachable, $reach.ElapsedMs)
+  if (-not $reach.Reachable) {
+    Write-Log ("Reachability warning: {0}:9100 was not reachable. Continuing install for offline provisioning; verify printer power/network if test page evidence is absent." -f $PrinterIP) "WARN"
+  }
 
   Import-PrintManagementOrFail
 

@@ -130,6 +130,13 @@ Describe "Brother installer regression tests" {
     ($installerContent -match 'Pending request stage: probing reachability to \{0\}:9100 with timeout=\{1\}ms') | Should Be $true
     ($installerContent -match 'Reachability to \{0\}:9100 via \{1\} => \{2\} \(elapsed=\{3\}ms\)') | Should Be $true
     ($installerContent -match 'Pending request reachability \{0\}:9100 via \{1\} => \{2\} \(elapsed=\{3\}ms\)') | Should Be $true
+    ($installerContent -match 'Reachability warning: \{0\}:9100 was not reachable\. Continuing install for offline provisioning; verify printer power/network if test page evidence is absent\.') | Should Be $true
+  }
+
+  It "installer treats no matching PrintService admin events as informational evidence" {
+    $installerContent = Get-Content -Path $installerPs1 -Raw
+    ($installerContent -match 'PrintService\(Admin\) evidence: no matching events found since \{0\}\.') | Should Be $true
+    ($installerContent -match 'NoMatchingEventsFound') | Should Be $true
   }
 
   It "launcher failure notifications include a user action guidance block" {
