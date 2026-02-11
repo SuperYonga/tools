@@ -70,6 +70,32 @@ The log contains BAT + PowerShell output, including:
 - printer/port checks
 - postcondition pass/fail details
 
+## Failure email notification (optional)
+The launcher can send an email when a run fails (non-zero exit or launcher exception).
+
+Enable with either:
+- CLI switch: `-NotifyOnFailure`
+- Env var: `SC_NOTIFY_ON_FAILURE=1`
+
+Optional recipient override:
+- `-NotifyTo "henry@supercivil.com.au"` (default is already `henry@supercivil.com.au`)
+
+Required SMTP environment variables:
+- `SC_SMTP_HOST` (or `SC_SMTP_SERVER`)
+- `SC_SMTP_FROM`
+
+Optional SMTP environment variables:
+- `SC_SMTP_PORT` (default `587`)
+- `SC_SMTP_SSL` (`1` default, set `0` to disable TLS)
+- `SC_SMTP_USER`
+- `SC_SMTP_PASS`
+
+Email content includes:
+- host/user/time
+- exit code + failure reason
+- log path
+- recent log tail (last 120 lines)
+
 ## Release packaging
 Run:
 

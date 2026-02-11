@@ -53,6 +53,31 @@ function Invoke-InstallerPs1 {
   }
 }
 
+function Invoke-LauncherPs1 {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$Args,
+    [Parameter(Mandatory = $true)][string]$LogPath
+  )
+
+  $pwsh = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+  if (-not (Test-Path $pwsh)) { $pwsh = "powershell.exe" }
+
+  $argList = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $launcherPs1
+  ) + $Args + @("-LogPath", $LogPath)
+
+  & $pwsh @argList
+  $exitCode = $LASTEXITCODE
+  $logText = if (Test-Path $LogPath) { Get-Content -Path $LogPath -Raw } else { "" }
+  return [PSCustomObject]@{
+    ExitCode = $exitCode
+    LogPath = $LogPath
+    LogText = $logText
+  }
+}
+
 function Invoke-Ps1File {
   param(
     [Parameter(Mandatory = $true)][string]$ScriptPath,
@@ -95,6 +120,32 @@ Describe "Brother installer regression tests" {
 
     ($installerContent -match 'Join-Path \(Join-Path \$PSScriptRoot "logs"\)') | Should Be $true
     ($launcherContent -match 'Join-Path \(Join-Path \$scriptDir "logs"\)') | Should Be $true
+  }
+
+  It "launcher failure notification path logs skip when SMTP is not configured" {
+    $logPath = New-TestLogPath -Prefix "launcher-notify-failure"
+    $oldNotify = $env:SC_NOTIFY_ON_FAILURE
+    $oldHost = $env:SC_SMTP_HOST
+    $oldServer = $env:SC_SMTP_SERVER
+    $oldFrom = $env:SC_SMTP_FROM
+    try {
+      $env:SC_NOTIFY_ON_FAILURE = "1"
+      Remove-Item Env:SC_SMTP_HOST -ErrorAction SilentlyContinue
+      Remove-Item Env:SC_SMTP_SERVER -ErrorAction SilentlyContinue
+      Remove-Item Env:SC_SMTP_FROM -ErrorAction SilentlyContinue
+
+      $result = Invoke-LauncherPs1 -Args @("-ValidateOnly","-PrinterIP","999.0.0.1") -LogPath $logPath
+
+      $result.ExitCode | Should Not Be 0
+      ($result.LogText -match "Failure notification enabled") | Should Be $true
+      ($result.LogText -match "Failure notification requested but skipped") | Should Be $true
+    }
+    finally {
+      if ($null -eq $oldNotify) { Remove-Item Env:SC_NOTIFY_ON_FAILURE -ErrorAction SilentlyContinue } else { $env:SC_NOTIFY_ON_FAILURE = $oldNotify }
+      if ($null -eq $oldHost) { Remove-Item Env:SC_SMTP_HOST -ErrorAction SilentlyContinue } else { $env:SC_SMTP_HOST = $oldHost }
+      if ($null -eq $oldServer) { Remove-Item Env:SC_SMTP_SERVER -ErrorAction SilentlyContinue } else { $env:SC_SMTP_SERVER = $oldServer }
+      if ($null -eq $oldFrom) { Remove-Item Env:SC_SMTP_FROM -ErrorAction SilentlyContinue } else { $env:SC_SMTP_FROM = $oldFrom }
+    }
   }
 
   It "ValidateOnly run succeeds and logs completion" {

@@ -6,7 +6,9 @@ param(
   [switch]$ValidateOnly,
   [switch]$SkipSignatureCheck,
   [switch]$NoTestPage,
-  [string]$LogPath
+  [string]$LogPath,
+  [switch]$NotifyOnFailure,
+  [string]$NotifyTo = "henry@supercivil.com.au"
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,8 +48,100 @@ function Quote-Arg {
   return '"' + ($Value -replace '"', '\"') + '"'
 }
 
+function Get-RecentLogLines {
+  param([int]$MaxLines = 120)
+  if ([string]::IsNullOrWhiteSpace($script:LogPath) -or -not (Test-Path $script:LogPath)) {
+    return "<No log file available>"
+  }
+  try {
+    $lines = Get-Content -Path $script:LogPath -Tail $MaxLines -ErrorAction Stop
+    if (-not $lines) {
+      return "<Log file exists but is empty>"
+    }
+    return ($lines -join [Environment]::NewLine)
+  }
+  catch {
+    return ("<Could not read log file '{0}': {1}>" -f $script:LogPath, $_.Exception.Message)
+  }
+}
+
+function Send-FailureNotification {
+  param(
+    [int]$ExitCode,
+    [string]$FailureMessage
+  )
+
+  $notifyRequested = $NotifyOnFailure -or ($env:SC_NOTIFY_ON_FAILURE -eq "1")
+  if (-not $notifyRequested) {
+    return
+  }
+
+  $smtpHost = $env:SC_SMTP_HOST
+  if ([string]::IsNullOrWhiteSpace($smtpHost)) {
+    $smtpHost = $env:SC_SMTP_SERVER
+  }
+  $smtpFrom = $env:SC_SMTP_FROM
+  $smtpUser = $env:SC_SMTP_USER
+  $smtpPass = $env:SC_SMTP_PASS
+
+  if ([string]::IsNullOrWhiteSpace($smtpHost) -or [string]::IsNullOrWhiteSpace($smtpFrom)) {
+    Write-LauncherLog "Failure notification requested but skipped: missing SC_SMTP_HOST/SC_SMTP_SERVER or SC_SMTP_FROM." "WARN"
+    return
+  }
+
+  $smtpPort = 587
+  if (-not [string]::IsNullOrWhiteSpace($env:SC_SMTP_PORT)) {
+    $parsedPort = 0
+    if ([int]::TryParse($env:SC_SMTP_PORT, [ref]$parsedPort) -and $parsedPort -gt 0) {
+      $smtpPort = $parsedPort
+    }
+  }
+  $smtpUseSsl = $true
+  if ($env:SC_SMTP_SSL -eq "0") {
+    $smtpUseSsl = $false
+  }
+
+  $subject = ("[Printer Installer] Failure on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
+  $logTail = Get-RecentLogLines -MaxLines 120
+  $body = @(
+    ("Time (UTC): {0}" -f (Get-Date).ToUniversalTime().ToString("o"))
+    ("Computer: {0}" -f $env:COMPUTERNAME)
+    ("User: {0}" -f [Environment]::UserName)
+    ("ExitCode: {0}" -f $ExitCode)
+    ("Failure: {0}" -f $FailureMessage)
+    ("LogPath: {0}" -f $script:LogPath)
+    ""
+    "Recent log lines:"
+    $logTail
+  ) -join [Environment]::NewLine
+
+  try {
+    $mail = New-Object System.Net.Mail.MailMessage
+    $mail.From = $smtpFrom
+    $mail.To.Add($NotifyTo)
+    $mail.Subject = $subject
+    $mail.Body = $body
+
+    $smtp = New-Object System.Net.Mail.SmtpClient($smtpHost, $smtpPort)
+    $smtp.EnableSsl = $smtpUseSsl
+    if (-not [string]::IsNullOrWhiteSpace($smtpUser)) {
+      $smtp.Credentials = New-Object System.Net.NetworkCredential($smtpUser, $smtpPass)
+    }
+    else {
+      $smtp.UseDefaultCredentials = $true
+    }
+
+    $smtp.Send($mail)
+    Write-LauncherLog ("Failure notification email sent to '{0}' via '{1}:{2}'." -f $NotifyTo, $smtpHost, $smtpPort)
+  }
+  catch {
+    Write-LauncherLog ("Failure notification send failed: {0}" -f $_.Exception.Message) "WARN"
+  }
+}
+
 if (-not (Test-Path $installerPs1)) {
   Write-Error "Missing installer script: $installerPs1"
+  Send-FailureNotification -ExitCode 1 -FailureMessage ("Missing installer script: {0}" -f $installerPs1)
   exit 1
 }
 
@@ -62,8 +156,11 @@ if (-not (Test-Path $script:LogPath)) { New-Item -ItemType File -Path $script:Lo
 
 Write-LauncherLog "Start launcher."
 Write-LauncherLog ("Installer path: {0}" -f $installerPs1)
-Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage)
+Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NotifyOnFailure={4}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NotifyOnFailure)
 Write-LauncherLog ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', LogPath='{3}'" -f $PrinterIP, $PrinterName, $DriverUrl, $script:LogPath)
+if ($NotifyOnFailure -or ($env:SC_NOTIFY_ON_FAILURE -eq "1")) {
+  Write-LauncherLog ("Failure notification enabled. NotifyTo='{0}'" -f $NotifyTo)
+}
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -96,16 +193,24 @@ if (-not $isAdmin -and -not $ValidateOnly) {
     $p = Start-Process -FilePath $powershellExe -ArgumentList $argLine -Verb RunAs -PassThru
     Write-LauncherLog ("Elevated PID={0}" -f $p.Id)
     Write-LauncherLog "Waiting for elevated process to complete..."
-    $p.WaitForExit()
+    $waitStart = Get-Date
+    while (-not $p.WaitForExit(1000)) {
+      $elapsedSec = [int]((Get-Date) - $waitStart).TotalSeconds
+      if ($elapsedSec -gt 0 -and ($elapsedSec % 15) -eq 0) {
+        Write-LauncherLog ("Still waiting for elevated process PID={0} ({1}s elapsed)." -f $p.Id, $elapsedSec)
+      }
+    }
     Write-LauncherLog ("Elevated process exit code={0}" -f $p.ExitCode)
     if ($p.ExitCode -ne 0) {
       Write-LauncherLog "Elevated process failed. Check installer logs after the last LAUNCHER line for root cause." "ERROR"
+      Send-FailureNotification -ExitCode $p.ExitCode -FailureMessage "Elevated installer process exited non-zero."
     }
     Write-LauncherLog "Launcher exiting after elevated child."
     exit $p.ExitCode
   }
   catch {
     Write-LauncherLog ("Elevation launch failed: {0}" -f $_.Exception.Message) "ERROR"
+    Send-FailureNotification -ExitCode 1 -FailureMessage ("Elevation launch failed: {0}" -f $_.Exception.Message)
     exit 1
   }
 }
@@ -116,6 +221,9 @@ try {
   & $installerPs1 @invokeArgs
   $rc = $LASTEXITCODE
   Write-LauncherLog ("Installer exit code={0}" -f $rc)
+  if ($rc -ne 0) {
+    Send-FailureNotification -ExitCode $rc -FailureMessage "Installer exited non-zero."
+  }
   Write-LauncherLog "Launcher complete."
   Write-Host ("Log file: {0}" -f $script:LogPath)
   exit $rc
@@ -123,5 +231,6 @@ try {
 catch {
   Write-LauncherLog ("Launcher failure: {0}" -f $_.Exception.Message) "ERROR"
   Write-LauncherLog ("Stack: {0}" -f $_.ScriptStackTrace) "ERROR"
+  Send-FailureNotification -ExitCode 1 -FailureMessage ("Launcher failure: {0}" -f $_.Exception.Message)
   exit 1
 }
