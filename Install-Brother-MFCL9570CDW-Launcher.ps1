@@ -8,7 +8,8 @@ param(
   [switch]$NoTestPage,
   [string]$LogPath,
   [switch]$NotifyOnFailure,
-  [string]$NotifyTo = "henry@supercivil.com.au"
+  [string]$NotifyTo = "henry@supercivil.com.au",
+  [switch]$PrepareOutlookMailOnFailure
 )
 
 $ErrorActionPreference = "Stop"
@@ -139,8 +140,78 @@ function Send-FailureNotification {
   }
 }
 
+function Prepare-OutlookFailureDraft {
+  param(
+    [int]$ExitCode,
+    [string]$FailureMessage
+  )
+
+  $draftRequested = $PrepareOutlookMailOnFailure -or ($env:SC_OUTLOOK_DRAFT_ON_FAILURE -eq "1")
+  if (-not $draftRequested) {
+    return
+  }
+
+  if ([string]::IsNullOrWhiteSpace($NotifyTo)) {
+    Write-LauncherLog "Outlook draft requested but skipped: NotifyTo is empty." "WARN"
+    return
+  }
+
+  $subject = ("[Printer Installer] Failure on {0} (exit={1})" -f $env:COMPUTERNAME, $ExitCode)
+  $body = @(
+    ("Time (UTC): {0}" -f (Get-Date).ToUniversalTime().ToString("o"))
+    ("Computer: {0}" -f $env:COMPUTERNAME)
+    ("User: {0}" -f [Environment]::UserName)
+    ("ExitCode: {0}" -f $ExitCode)
+    ("Failure: {0}" -f $FailureMessage)
+    ("LogPath: {0}" -f $script:LogPath)
+    ""
+    "If attachment is missing, attach LogPath file manually and send."
+  ) -join [Environment]::NewLine
+
+  $draftMode = "default"
+  if (-not [string]::IsNullOrWhiteSpace($env:SC_MAIL_DRAFT_MODE)) {
+    $draftMode = $env:SC_MAIL_DRAFT_MODE.ToLowerInvariant()
+  }
+
+  if ($draftMode -ne "outlookcom") {
+    try {
+      $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
+        [Uri]::EscapeDataString($NotifyTo),
+        [Uri]::EscapeDataString($subject),
+        [Uri]::EscapeDataString($body))
+      Start-Process $mailToUri | Out-Null
+      Write-LauncherLog ("Default mail client draft opened for '{0}' (mode=default)." -f $NotifyTo)
+      if (-not [string]::IsNullOrWhiteSpace($script:LogPath) -and (Test-Path $script:LogPath)) {
+        Write-LauncherLog ("Default mailto draft cannot auto-attach files reliably. Attach this log manually: {0}" -f $script:LogPath) "WARN"
+      }
+      return
+    }
+    catch {
+      Write-LauncherLog ("Default mail client draft failed, falling back to Outlook COM: {0}" -f $_.Exception.Message) "WARN"
+    }
+  }
+
+  try {
+    $outlook = New-Object -ComObject Outlook.Application
+    $mail = $outlook.CreateItem(0)
+    $mail.To = $NotifyTo
+    $mail.Subject = $subject
+    $mail.Body = $body
+    if (-not [string]::IsNullOrWhiteSpace($script:LogPath) -and (Test-Path $script:LogPath)) {
+      $mail.Attachments.Add($script:LogPath) | Out-Null
+    }
+    $mail.Save()
+    $mail.Display()
+    Write-LauncherLog ("Outlook COM failure draft prepared for '{0}' (mode=outlookcom)." -f $NotifyTo)
+  }
+  catch {
+    Write-LauncherLog ("Outlook failure draft preparation failed: {0}" -f $_.Exception.Message) "WARN"
+  }
+}
+
 if (-not (Test-Path $installerPs1)) {
   Write-Error "Missing installer script: $installerPs1"
+  Prepare-OutlookFailureDraft -ExitCode 1 -FailureMessage ("Missing installer script: {0}" -f $installerPs1)
   Send-FailureNotification -ExitCode 1 -FailureMessage ("Missing installer script: {0}" -f $installerPs1)
   exit 1
 }
@@ -156,10 +227,13 @@ if (-not (Test-Path $script:LogPath)) { New-Item -ItemType File -Path $script:Lo
 
 Write-LauncherLog "Start launcher."
 Write-LauncherLog ("Installer path: {0}" -f $installerPs1)
-Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NotifyOnFailure={4}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NotifyOnFailure)
+Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NotifyOnFailure={4}, PrepareOutlookMailOnFailure={5}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NotifyOnFailure, $PrepareOutlookMailOnFailure)
 Write-LauncherLog ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', LogPath='{3}'" -f $PrinterIP, $PrinterName, $DriverUrl, $script:LogPath)
 if ($NotifyOnFailure -or ($env:SC_NOTIFY_ON_FAILURE -eq "1")) {
   Write-LauncherLog ("Failure notification enabled. NotifyTo='{0}'" -f $NotifyTo)
+}
+if ($PrepareOutlookMailOnFailure -or ($env:SC_OUTLOOK_DRAFT_ON_FAILURE -eq "1")) {
+  Write-LauncherLog ("Outlook failure draft enabled. NotifyTo='{0}'" -f $NotifyTo)
 }
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -203,6 +277,7 @@ if (-not $isAdmin -and -not $ValidateOnly) {
     Write-LauncherLog ("Elevated process exit code={0}" -f $p.ExitCode)
     if ($p.ExitCode -ne 0) {
       Write-LauncherLog "Elevated process failed. Check installer logs after the last LAUNCHER line for root cause." "ERROR"
+      Prepare-OutlookFailureDraft -ExitCode $p.ExitCode -FailureMessage "Elevated installer process exited non-zero."
       Send-FailureNotification -ExitCode $p.ExitCode -FailureMessage "Elevated installer process exited non-zero."
     }
     Write-LauncherLog "Launcher exiting after elevated child."
@@ -210,6 +285,7 @@ if (-not $isAdmin -and -not $ValidateOnly) {
   }
   catch {
     Write-LauncherLog ("Elevation launch failed: {0}" -f $_.Exception.Message) "ERROR"
+    Prepare-OutlookFailureDraft -ExitCode 1 -FailureMessage ("Elevation launch failed: {0}" -f $_.Exception.Message)
     Send-FailureNotification -ExitCode 1 -FailureMessage ("Elevation launch failed: {0}" -f $_.Exception.Message)
     exit 1
   }
@@ -222,6 +298,7 @@ try {
   $rc = $LASTEXITCODE
   Write-LauncherLog ("Installer exit code={0}" -f $rc)
   if ($rc -ne 0) {
+    Prepare-OutlookFailureDraft -ExitCode $rc -FailureMessage "Installer exited non-zero."
     Send-FailureNotification -ExitCode $rc -FailureMessage "Installer exited non-zero."
   }
   Write-LauncherLog "Launcher complete."
@@ -231,6 +308,7 @@ try {
 catch {
   Write-LauncherLog ("Launcher failure: {0}" -f $_.Exception.Message) "ERROR"
   Write-LauncherLog ("Stack: {0}" -f $_.ScriptStackTrace) "ERROR"
+  Prepare-OutlookFailureDraft -ExitCode 1 -FailureMessage ("Launcher failure: {0}" -f $_.Exception.Message)
   Send-FailureNotification -ExitCode 1 -FailureMessage ("Launcher failure: {0}" -f $_.Exception.Message)
   exit 1
 }

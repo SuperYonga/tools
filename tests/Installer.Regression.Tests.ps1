@@ -148,6 +148,22 @@ Describe "Brother installer regression tests" {
     }
   }
 
+  It "launcher mail-draft path logs enabled and handles unavailable clients safely" {
+    $logPath = New-TestLogPath -Prefix "launcher-outlook-failure"
+    $oldOutlookDraft = $env:SC_OUTLOOK_DRAFT_ON_FAILURE
+    try {
+      $env:SC_OUTLOOK_DRAFT_ON_FAILURE = "1"
+      $result = Invoke-LauncherPs1 -Args @("-ValidateOnly","-PrinterIP","999.0.0.1") -LogPath $logPath
+
+      $result.ExitCode | Should Not Be 0
+      ($result.LogText -match "Outlook failure draft enabled") | Should Be $true
+      ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Outlook COM failure draft prepared|Outlook failure draft preparation failed") | Should Be $true
+    }
+    finally {
+      if ($null -eq $oldOutlookDraft) { Remove-Item Env:SC_OUTLOOK_DRAFT_ON_FAILURE -ErrorAction SilentlyContinue } else { $env:SC_OUTLOOK_DRAFT_ON_FAILURE = $oldOutlookDraft }
+    }
+  }
+
   It "ValidateOnly run succeeds and logs completion" {
     $logPath = New-TestLogPath -Prefix "validate-only"
     $result = Invoke-InstallerPs1 -Args @("-ValidateOnly","-SkipSignatureCheck") -LogPath $logPath -WorkRoot $testWorkRoot

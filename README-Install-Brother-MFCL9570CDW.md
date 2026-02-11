@@ -96,6 +96,24 @@ Email content includes:
 - log path
 - recent log tail (last 120 lines)
 
+## Outlook draft on failure (optional, Windows desktop)
+The launcher can open a prefilled draft in the default Windows mail client (including whichever Outlook profile/app is currently configured).
+
+Enable with either:
+- CLI switch: `-PrepareOutlookMailOnFailure`
+- Env var: `SC_OUTLOOK_DRAFT_ON_FAILURE=1`
+
+Draft mode:
+- Default: uses system default mail client via `mailto:` (best for "use whatever is already set up")
+- Optional fallback mode: set `SC_MAIL_DRAFT_MODE=outlookcom` to force classic Outlook COM draft behavior
+
+Behavior:
+- On failure, it creates an Outlook mail item addressed to `henry@supercivil.com.au` (or `-NotifyTo` override).
+- Subject is prefilled with host + exit code.
+- Body includes failure context and log path.
+- In default `mailto` mode, attachment cannot be reliably auto-added by Windows standards; attach the logged file path manually.
+- In `outlookcom` mode, the current log file is attached automatically.
+
 ## Release packaging
 Run:
 
