@@ -74,15 +74,11 @@ The log contains BAT + PowerShell output, including:
 - The launcher shows a live terminal spinner while waiting for installer completion.
 - Every 15 seconds it also writes a heartbeat line to the log (`Still waiting for process PID=...`).
 - Disable spinner output with `SC_SHOW_PROGRESS=0` (heartbeats remain in logs).
-- Keep `cmd` open only on failures: set `SC_PAUSE_ON_FAILURE=1`.
+- `cmd` stays open on failures by default so error output is visible.
 - Keep `cmd` open for every run: set `SC_PAUSE=1`.
 
-## Failure email notification (optional)
-The launcher can send an email when a run fails (non-zero exit or launcher exception).
-
-Enable with either:
-- CLI switch: `-NotifyOnFailure`
-- Env var: `SC_NOTIFY_ON_FAILURE=1`
+## Failure email notification
+The launcher always attempts to send an email when a run fails (non-zero exit or launcher exception).
 
 Optional recipient override:
 - `-NotifyTo "henry@supercivil.com.au"` (default is already `henry@supercivil.com.au`)
@@ -104,12 +100,8 @@ Email content includes:
 - `User Action Required` next-step checklist
 - recent log tail (last 120 lines)
 
-## Outlook draft on failure (optional, Windows desktop)
-The launcher can open a prefilled draft in the default Windows mail client (including whichever Outlook profile/app is currently configured).
-
-Enable with either:
-- CLI switch: `-PrepareOutlookMailOnFailure`
-- Env var: `SC_OUTLOOK_DRAFT_ON_FAILURE=1`
+## Outlook draft on failure (Windows desktop)
+The launcher always attempts to open a prefilled draft in the default Windows mail client on failure (including whichever Outlook profile/app is currently configured).
 
 Draft mode:
 - Default: uses system default mail client via `mailto:` (best for "use whatever is already set up")
@@ -141,8 +133,7 @@ Default output location:
 - Install mode requires Administrator privileges.
 - ValidateOnly mode does not install or change printer state.
 - Keep `INSTALL.bat`, `Install-Brother-MFCL9570CDW-Launcher.ps1`, and `Install-Brother-MFCL9570CDW.ps1` in the same folder.
-- `INSTALL.bat` is non-interactive by default (no auto-pause).
-- Set `SC_PAUSE_ON_FAILURE=1` to pause only when exit code is non-zero.
+- `INSTALL.bat` pauses on non-zero exit by default.
 - Set `SC_PAUSE=1` to always pause at the end.
 - Test-page request handling is automatic:
   - The installer invokes the test page without user input.

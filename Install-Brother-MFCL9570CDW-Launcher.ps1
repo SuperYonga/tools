@@ -162,11 +162,6 @@ function Send-FailureNotification {
     [string]$FailureMessage
   )
 
-  $notifyRequested = $NotifyOnFailure -or ($env:SC_NOTIFY_ON_FAILURE -eq "1")
-  if (-not $notifyRequested) {
-    return
-  }
-
   $smtpHost = $env:SC_SMTP_HOST
   if ([string]::IsNullOrWhiteSpace($smtpHost)) {
     $smtpHost = $env:SC_SMTP_SERVER
@@ -225,11 +220,6 @@ function Prepare-OutlookFailureDraft {
     [int]$ExitCode,
     [string]$FailureMessage
   )
-
-  $draftRequested = $PrepareOutlookMailOnFailure -or ($env:SC_OUTLOOK_DRAFT_ON_FAILURE -eq "1")
-  if (-not $draftRequested) {
-    return
-  }
 
   if ([string]::IsNullOrWhiteSpace($NotifyTo)) {
     Write-LauncherLog "Outlook draft requested but skipped: NotifyTo is empty." "WARN"
@@ -312,12 +302,8 @@ Write-LauncherLog "Start launcher."
 Write-LauncherLog ("Installer path: {0}" -f $installerPs1)
 Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NotifyOnFailure={4}, PrepareOutlookMailOnFailure={5}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NotifyOnFailure, $PrepareOutlookMailOnFailure)
 Write-LauncherLog ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', LogPath='{3}'" -f $PrinterIP, $PrinterName, $DriverUrl, $script:LogPath)
-if ($NotifyOnFailure -or ($env:SC_NOTIFY_ON_FAILURE -eq "1")) {
-  Write-LauncherLog ("Failure notification enabled. NotifyTo='{0}'" -f $NotifyTo)
-}
-if ($PrepareOutlookMailOnFailure -or ($env:SC_OUTLOOK_DRAFT_ON_FAILURE -eq "1")) {
-  Write-LauncherLog ("Outlook failure draft enabled. NotifyTo='{0}'" -f $NotifyTo)
-}
+Write-LauncherLog ("Failure notification mode: always-on. NotifyTo='{0}'" -f $NotifyTo)
+Write-LauncherLog ("Outlook failure draft mode: always-on. NotifyTo='{0}'" -f $NotifyTo)
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
