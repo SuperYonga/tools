@@ -681,9 +681,11 @@ function Ensure-PendingRetryScheduledTask {
 
     $taskArgs = ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -RetryPendingOnly -NoTestPage -LogPath "{1}"' -f $PSCommandPath, $RetryWorkerLogPath)
     $action = New-ScheduledTaskAction -Execute $psExe -Argument $taskArgs
-    $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1))
-    $trigger.RepetitionInterval = (New-TimeSpan -Minutes $PendingRetryBaseMinutes)
-    $trigger.RepetitionDuration = (New-TimeSpan -Days 3650)
+    $trigger = New-ScheduledTaskTrigger `
+      -Once `
+      -At ((Get-Date).AddMinutes(1)) `
+      -RepetitionInterval (New-TimeSpan -Minutes $PendingRetryBaseMinutes) `
+      -RepetitionDuration (New-TimeSpan -Days 3650)
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     Register-ScheduledTask -TaskName $PendingRetryTaskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
     Write-Log ("Scheduled retry task ensured. Name='{0}', IntervalMinutes={1}" -f $PendingRetryTaskName, $PendingRetryBaseMinutes)

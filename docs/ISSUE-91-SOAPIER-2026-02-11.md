@@ -112,3 +112,105 @@
 ## (14) Finish
 - Issue judged complete for this iteration.
 - Ready to commit and push branch for CI and PR workflow.
+
+---
+
+# ISSUE-91 SOAPIER Addendum (2026-02-11, scheduled retry task regression)
+
+## (1) Git Hygiene + Issue/Branch Alignment
+- Verified branch: `issue-91-test-page-strict-failure-comms`.
+- Verified issue exists and remains open: `#91`.
+- Verified this branch is the active tracking branch for issue scope.
+
+## (2) Presenting Issue
+- New log evidence from install run (`2026-02-11 13:16:20`) shows:
+  - `Could not ensure scheduled retry task 'SuperCivil-PrinterTestPageRetry': Exception setting "RepetitionInterval": "The property 'RepetitionInterval' cannot be found on this object..."`
+- Impact: pending retry queue is persisted but retry task scheduling degrades, reducing automatic recovery reliability.
+
+## (3) Past History
+- Related issue/branch lineage:
+  - `#88` / `issue-88-single-failure-email-per-run`
+  - `#89` / `issue-89-reachability-probe-logging-timeout`
+  - `#91` / `issue-91-test-page-strict-failure-comms` (current)
+- Related code and tests:
+  - `Install-Brother-MFCL9570CDW.ps1` retry task orchestration.
+  - `tests/Installer.Regression.Tests.ps1` retry and launcher regression suite.
+  - CI entrypoint already enforced by `.github/workflows/regression-tests.yml` via `npm test`.
+
+## (4) Subjective Assessment
+- Installation path is mostly healthy (driver + queue + printer creation pass), but the retry scheduler warning indicates a concrete implementation mismatch with ScheduledTasks trigger object semantics on this host.
+
+## (5) Objective Assessment (Testing + Logs + Source)
+- Reproduced object model behavior in-shell:
+  - `New-ScheduledTaskTrigger -Once -At ...` returns `MSFT_TaskTimeTrigger` with property `Repetition` (nested), not top-level `RepetitionInterval`.
+- Source root-cause confirmed:
+  - `Install-Brother-MFCL9570CDW.ps1` used:
+    - `$trigger.RepetitionInterval = ...`
+    - `$trigger.RepetitionDuration = ...`
+- Prescribed tests executed after fix:
+  - `npm test`
+  - Result: `Passed: 22 Failed: 0`
+  - Artifact: `tests/artifacts/pester-results.xml`
+
+## (6) Analysis (Gap vs Best Practice)
+### (a) Current Codebase Gap
+1. Scheduled trigger repetition was configured via unsupported direct property assignment on the trigger object.
+
+### (b) Best-Practice References
+1. Microsoft ScheduledTasks cmdlet contract:
+   - `New-ScheduledTaskTrigger` supports `-RepetitionInterval` and `-RepetitionDuration` parameters (preferred over ad-hoc object mutation).
+2. Reliability/logging guidance:
+   - Keep deterministic, machine-parseable failure logs and avoid warnings caused by avoidable API misuse.
+   - NIST log management baseline: https://csrc.nist.gov/pubs/sp/800/92/final
+   - OWASP logging guidance: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
+
+## (7) Prioritized Problem List
+### (a) Immediate Fix
+1. Replace unsupported `trigger` property assignment with native `New-ScheduledTaskTrigger` repetition parameters.
+2. Add regression assertions to prevent reintroduction.
+
+### (b) Shift-Left Strategy
+1. Keep static source guardrails in Pester for scheduler API usage.
+2. Keep runtime regression assertion that logs do not include the known `RepetitionInterval` property error text.
+
+## (8) Intervention
+- Updated `Install-Brother-MFCL9570CDW.ps1`:
+  - Replaced trigger mutation with:
+    - `New-ScheduledTaskTrigger -Once -At ... -RepetitionInterval ... -RepetitionDuration ...`
+- Updated `tests/Installer.Regression.Tests.ps1`:
+  - Added test: `installer uses supported ScheduledTasks repetition trigger parameters`.
+  - Added runtime assertion in retry-path test ensuring log does not contain:
+    - `property 'RepetitionInterval' cannot be found`.
+
+## (9) Evaluation (Evidence)
+- Test run:
+  - Command: `npm test`
+  - Result: `Passed: 22 Failed: 0`
+- Code evidence:
+  - `Install-Brother-MFCL9570CDW.ps1` now uses `New-ScheduledTaskTrigger` repetition parameters directly.
+  - `tests/Installer.Regression.Tests.ps1` includes static and runtime regression guards for this exact error signature.
+
+## (10) Review
+- Issue scope status for this addendum: DONE for the scheduled retry task defect.
+- Merge-conflict check with `origin/main`:
+  - `git fetch origin --prune` executed.
+  - `git merge-base HEAD origin/main` still returns no merge-base in current clone topology, so direct conflict simulation with `origin/main` remains unavailable here.
+
+## (11) Documentation-as-Code
+- This addendum records the second evidence cycle under issue `#91`.
+- A matching SOAPIER progress comment was posted to issue `#91`.
+
+## (12) Git Hygiene
+- Local changes scoped to:
+  - `Install-Brother-MFCL9570CDW.ps1`
+  - `tests/Installer.Regression.Tests.ps1`
+  - `docs/ISSUE-91-SOAPIER-2026-02-11.md`
+
+## (13) Pre-Commit Checks
+- Issue exists: `#91`.
+- Branch aligned: `issue-91-test-page-strict-failure-comms`.
+- Documentation updated: this SOAPIER addendum.
+- Tests green: `npm test` (`22/22` passed).
+
+## (14) Finish
+- Ready to commit and push this fix branch for CI and PR processing.

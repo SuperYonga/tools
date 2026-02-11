@@ -138,6 +138,13 @@ Describe "Brother installer regression tests" {
     ($installerContent -match "exit 2") | Should Be $true
   }
 
+  It "installer uses supported ScheduledTasks repetition trigger parameters" {
+    $installerContent = Get-Content -Path $installerPs1 -Raw
+    ($installerContent -match 'New-ScheduledTaskTrigger\s+`?\s*-Once\s+`?\s*-At\s+\(\(Get-Date\)\.AddMinutes\(1\)\)\s+`?\s*-RepetitionInterval\s+\(New-TimeSpan -Minutes \$PendingRetryBaseMinutes\)\s+`?\s*-RepetitionDuration\s+\(New-TimeSpan -Days 3650\)') | Should Be $true
+    ($installerContent -match '\$trigger\.RepetitionInterval\s*=') | Should Be $false
+    ($installerContent -match '\$trigger\.RepetitionDuration\s*=') | Should Be $false
+  }
+
   It "installer treats no matching PrintService admin events as informational evidence" {
     $installerContent = Get-Content -Path $installerPs1 -Raw
     ($installerContent -match 'PrintService\(Admin\) evidence: no matching events found since \{0\}\.') | Should Be $true
@@ -347,6 +354,7 @@ Describe "Brother installer regression tests" {
     $result = Invoke-InstallerPs1 -Args @("-RetryPendingOnly","-NoTestPage") -LogPath $logPath -WorkRoot $testWorkRoot
 
     $result.ExitCode | Should Be 0
+    ($result.LogText -match "property 'RepetitionInterval' cannot be found") | Should Be $false
     ($result.LogText -match "Scheduled retry task ensured|Could not ensure scheduled retry task|ScheduledTasks cmdlets are unavailable; cannot ensure retry task") | Should Be $true
   }
 
