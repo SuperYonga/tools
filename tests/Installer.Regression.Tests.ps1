@@ -179,9 +179,9 @@ Describe "Brother installer regression tests" {
 
       $result.ExitCode | Should Not Be 0
       ($result.LogText -match "Failure handler triggered") | Should Be $true
-      ($result.LogText -match "Outlook failure draft mode: always-on \(default mode=default-client, fallback=outlookcom\)") | Should Be $true
+      ($result.LogText -match "Outlook failure draft mode: always-on \(default mode=default-client, fallback=notepad instructions\)") | Should Be $true
       ($result.LogText -match "Mailto body truncated") | Should Be $true
-      ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Outlook COM failure draft prepared|Outlook failure draft preparation failed|Default mail client draft fallback also failed") | Should Be $true
+      ($result.LogText -match "Default mail client draft opened|Default mail client draft failed|Manual fallback opened in Notepad|Manual Notepad fallback failed") | Should Be $true
     }
     finally {
       if ($null -eq $oldMailtoMaxBody) { Remove-Item Env:SC_MAILTO_MAX_BODY_CHARS -ErrorAction SilentlyContinue } else { $env:SC_MAILTO_MAX_BODY_CHARS = $oldMailtoMaxBody }

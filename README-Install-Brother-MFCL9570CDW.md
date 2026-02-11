@@ -105,8 +105,7 @@ The launcher always attempts to open a prefilled draft in the default Windows ma
 
 Draft mode:
 - Default: uses system default mail client first (`default`) so the currently configured Outlook/mail app is respected
-- Fallback: uses Outlook COM (`outlookcom`) when default-client launch fails
-- Optional override: set `SC_MAIL_DRAFT_MODE=outlookcom` to force classic Outlook COM first
+- Fallback: opens Notepad instructions + the run log when default-client launch fails
 
 Behavior:
 - On failure, it creates an Outlook mail item addressed to `henry@supercivil.com.au` (or `-NotifyTo` override).
@@ -114,7 +113,7 @@ Behavior:
 - Body includes failure context, `User Action Required` steps, and full log content.
 - In `mailto` mode, body length is capped (default `4500` chars) to keep URI launch reliable.
 - Optional override: `SC_MAILTO_MAX_BODY_CHARS` (must be >512).
-- In `outlookcom` mode, the current log file is attached automatically.
+- If draft open fails, Notepad opens with manual instructions and asks the user to email `henry@supercivil.com.au` with the run log attached.
 
 ## Release packaging
 Run:

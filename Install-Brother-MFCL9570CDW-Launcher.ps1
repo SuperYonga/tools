@@ -238,81 +238,63 @@ function Prepare-OutlookFailureDraft {
   $logContent = Get-LogContent -Full
   $fullBody = New-FailureMessageBody -ExitCode $ExitCode -FailureMessage $FailureMessage -LogContent $logContent
 
-  $draftMode = "default"
-  if (-not [string]::IsNullOrWhiteSpace($env:SC_MAIL_DRAFT_MODE)) {
-    $draftMode = $env:SC_MAIL_DRAFT_MODE.ToLowerInvariant()
+  $mailtoMaxBodyChars = 4500
+  if (-not [string]::IsNullOrWhiteSpace($env:SC_MAILTO_MAX_BODY_CHARS)) {
+    $parsedMax = 0
+    if ([int]::TryParse($env:SC_MAILTO_MAX_BODY_CHARS, [ref]$parsedMax) -and $parsedMax -gt 512) {
+      $mailtoMaxBodyChars = $parsedMax
+    }
   }
 
-  if ($draftMode -ne "outlookcom") {
-    try {
-      $mailtoMaxBodyChars = 4500
-      if (-not [string]::IsNullOrWhiteSpace($env:SC_MAILTO_MAX_BODY_CHARS)) {
-        $parsedMax = 0
-        if ([int]::TryParse($env:SC_MAILTO_MAX_BODY_CHARS, [ref]$parsedMax) -and $parsedMax -gt 512) {
-          $mailtoMaxBodyChars = $parsedMax
-        }
-      }
-
-      $mailtoBody = $fullBody
-      if ($mailtoBody.Length -gt $mailtoMaxBodyChars) {
-        $mailtoBody = $mailtoBody.Substring(0, $mailtoMaxBodyChars) + [Environment]::NewLine + "[TRUNCATED] Open log file for full details."
-        Write-LauncherLog ("Mailto body truncated to {0} chars. Set SC_MAILTO_MAX_BODY_CHARS higher if needed." -f $mailtoMaxBodyChars) "WARN"
-      }
-
-      $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
-        [Uri]::EscapeDataString($NotifyTo),
-        [Uri]::EscapeDataString($subject),
-        [Uri]::EscapeDataString($mailtoBody))
-      Start-Process $mailToUri | Out-Null
-      Write-LauncherLog ("Default mail client draft opened for '{0}' (mode=default)." -f $NotifyTo)
-      return
-    }
-    catch {
-      Write-LauncherLog ("Default mail client draft failed, falling back to Outlook COM: {0}" -f $_.Exception.Message) "WARN"
-    }
+  $mailtoBody = $fullBody
+  if ($mailtoBody.Length -gt $mailtoMaxBodyChars) {
+    $mailtoBody = $mailtoBody.Substring(0, $mailtoMaxBodyChars) + [Environment]::NewLine + "[TRUNCATED] Open log file for full details."
+    Write-LauncherLog ("Mailto body truncated to {0} chars. Set SC_MAILTO_MAX_BODY_CHARS higher if needed." -f $mailtoMaxBodyChars) "WARN"
   }
 
   try {
-    $outlook = New-Object -ComObject Outlook.Application
-    $mail = $outlook.CreateItem(0)
-    $mail.To = $NotifyTo
-    $mail.Subject = $subject
-    $mail.Body = $fullBody
+    $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
+      [Uri]::EscapeDataString($NotifyTo),
+      [Uri]::EscapeDataString($subject),
+      [Uri]::EscapeDataString($mailtoBody))
+    Start-Process $mailToUri | Out-Null
+    Write-LauncherLog ("Default mail client draft opened for '{0}' (mode=default)." -f $NotifyTo)
+    return
+  }
+  catch {
+    Write-LauncherLog ("Default mail client draft failed: {0}" -f $_.Exception.Message) "WARN"
+  }
+
+  try {
+    $manualNotePath = Join-Path $env:TEMP ("printer-install-failure-email-{0}.txt" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $manualNote = @(
+      "Failure notification draft could not be opened automatically."
+      ""
+      "User Action Required:"
+      "1) Email all details below to henry@supercivil.com.au."
+      "2) Include this run log as an attachment: $script:LogPath"
+      "3) Include any screenshots or printer panel error codes."
+      ""
+      "Suggested subject:"
+      $subject
+      ""
+      "Suggested recipient:"
+      "henry@supercivil.com.au"
+      ""
+      "Failure body:"
+      $fullBody
+    ) -join [Environment]::NewLine
+    Set-Content -Path $manualNotePath -Value $manualNote -Encoding UTF8
+    Start-Process notepad.exe -ArgumentList ('"{0}"' -f $manualNotePath) | Out-Null
+    Write-LauncherLog ("Manual fallback opened in Notepad: '{0}'" -f $manualNotePath) "WARN"
     if (-not [string]::IsNullOrWhiteSpace($script:LogPath) -and (Test-Path $script:LogPath)) {
-      $mail.Attachments.Add($script:LogPath) | Out-Null
+      Start-Process notepad.exe -ArgumentList ('"{0}"' -f $script:LogPath) | Out-Null
+      Write-LauncherLog ("Run log opened in Notepad: '{0}'" -f $script:LogPath) "WARN"
     }
-    $mail.Save()
-    $mail.Display()
-    Write-LauncherLog ("Outlook COM failure draft prepared for '{0}' (mode=outlookcom)." -f $NotifyTo)
-    }
-    catch {
-      Write-LauncherLog ("Outlook failure draft preparation failed: {0}" -f $_.Exception.Message) "WARN"
-      try {
-        $mailtoMaxBodyChars = 4500
-        if (-not [string]::IsNullOrWhiteSpace($env:SC_MAILTO_MAX_BODY_CHARS)) {
-          $parsedMax = 0
-          if ([int]::TryParse($env:SC_MAILTO_MAX_BODY_CHARS, [ref]$parsedMax) -and $parsedMax -gt 512) {
-            $mailtoMaxBodyChars = $parsedMax
-          }
-        }
-
-        $mailtoBody = $fullBody
-        if ($mailtoBody.Length -gt $mailtoMaxBodyChars) {
-          $mailtoBody = $mailtoBody.Substring(0, $mailtoMaxBodyChars) + [Environment]::NewLine + "[TRUNCATED] Open log file for full details."
-          Write-LauncherLog ("Mailto body truncated to {0} chars. Set SC_MAILTO_MAX_BODY_CHARS higher if needed." -f $mailtoMaxBodyChars) "WARN"
-        }
-
-        $mailToUri = ("mailto:{0}?subject={1}&body={2}" -f
-          [Uri]::EscapeDataString($NotifyTo),
-          [Uri]::EscapeDataString($subject),
-          [Uri]::EscapeDataString($mailtoBody))
-        Start-Process $mailToUri | Out-Null
-        Write-LauncherLog ("Default mail client draft opened for '{0}' (fallback after Outlook COM failure)." -f $NotifyTo)
-      }
-      catch {
-        Write-LauncherLog ("Default mail client draft fallback also failed: {0}" -f $_.Exception.Message) "WARN"
-      }
-    }
+  }
+  catch {
+    Write-LauncherLog ("Manual Notepad fallback failed: {0}" -f $_.Exception.Message) "WARN"
+  }
 }
 
 function Invoke-FailureComms {
@@ -346,7 +328,7 @@ Write-LauncherLog ("Installer path: {0}" -f $installerPs1)
 Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NotifyOnFailure={4}, PrepareOutlookMailOnFailure={5}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NotifyOnFailure, $PrepareOutlookMailOnFailure)
 Write-LauncherLog ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', LogPath='{3}'" -f $PrinterIP, $PrinterName, $DriverUrl, $script:LogPath)
 Write-LauncherLog ("Failure notification mode: always-on. NotifyTo='{0}'" -f $NotifyTo)
-Write-LauncherLog ("Outlook failure draft mode: always-on (default mode=default-client, fallback=outlookcom). NotifyTo='{0}'" -f $NotifyTo)
+Write-LauncherLog ("Outlook failure draft mode: always-on (default mode=default-client, fallback=notepad instructions). NotifyTo='{0}'" -f $NotifyTo)
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
