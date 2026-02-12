@@ -13,7 +13,11 @@ Files included:
 ## End-user usage (recommended)
 1. Unzip all files to one folder.
 2. Double-click `INSTALL.bat`.
-3. Approve the UAC prompt when asked.
+3. Select startup option:
+   - `1` Brother MFC-L9570CDW (default profile)
+   - `2` Epson (placeholder; not configured yet)
+   - `3` Custom (prompts for driver URL, printer IP, printer name)
+4. Approve the UAC prompt when asked.
 
 Default printer IP used by BAT:
 - `192.168.0.120`
@@ -28,6 +32,11 @@ From `cmd` in the same folder:
 Install using default IP:
 ```bat
 INSTALL.bat
+```
+
+Skip startup menu (automation/non-interactive):
+```bat
+INSTALL.bat -SkipStartupMenu
 ```
 
 Install using a custom IP:
@@ -90,6 +99,7 @@ The log contains BAT + PowerShell output, including:
 - The launcher shows a live terminal spinner while waiting for installer completion.
 - Every 15 seconds it also writes a heartbeat line to the log (`Still waiting for process PID=...`).
 - Disable spinner output with `SC_SHOW_PROGRESS=0` (heartbeats remain in logs).
+- Disable startup menu with `SC_DISABLE_STARTUP_MENU=1` (same effect as `-SkipStartupMenu`).
 - `cmd` stays open on failures by default so error output is visible.
 - Keep `cmd` open for every run: set `SC_PAUSE=1`.
 

@@ -187,6 +187,18 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "NotifyAlways") | Should Be $true
   }
 
+  It "launcher provides startup printer selection menu with Brother Epson and Custom options" {
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+    ($launcherContent -match '\[ValidateSet\("Brother","Epson","Custom"\)\]') | Should Be $true
+    ($launcherContent -match "function Resolve-StartupPrinterSelection") | Should Be $true
+    ($launcherContent -match "Select printer setup option:") | Should Be $true
+    ($launcherContent -match "1\) Brother MFC-L9570CDW \(default\)") | Should Be $true
+    ($launcherContent -match "2\) Epson \(not configured yet\)") | Should Be $true
+    ($launcherContent -match "3\) Custom printer \(URL \+ IP \+ name\)") | Should Be $true
+    ($launcherContent -match "SkipStartupMenu") | Should Be $true
+    ($launcherContent -match "SC_DISABLE_STARTUP_MENU") | Should Be $true
+  }
+
   It "launcher failure notification path uses a single mail-draft channel when SMTP is not configured" {
     $logPath = New-TestLogPath -Prefix "launcher-notify-failure"
     $oldHost = $env:SC_SMTP_HOST
@@ -245,7 +257,13 @@ Describe "Brother installer regression tests" {
     ($installerContent -match "function Ensure-PrinterQueueExists") | Should Be $true
     ($installerContent -match "Add-Printer failed for") | Should Be $true
     ($installerContent -match "0x000003f0") | Should Be $true
+    ($installerContent -match "function Get-Win32CodeFromException") | Should Be $true
+    ($installerContent -match "function Test-IsNoTokenError") | Should Be $true
+    ($installerContent -match "Test-IsNoTokenError -ErrorRecordOrException") | Should Be $true
+    ($installerContent -match "\$NoTokenWin32ErrorCode = 1008") | Should Be $true
     ($installerContent -match "function Set-DefaultPrinterBestEffort") | Should Be $true
+    ($installerContent -match "Skipping default-printer set due to non-interactive/system context") | Should Be $true
+    ($installerContent -match "Security context: User=") | Should Be $true
     ($installerContent -match "Postcondition: default printer is Name=") | Should Be $true
     ($installerContent -match "NoSetDefaultPrinter") | Should Be $true
   }
