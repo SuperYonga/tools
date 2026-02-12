@@ -257,7 +257,13 @@ Describe "Brother installer regression tests" {
     ($installerContent -match "function Ensure-PrinterQueueExists") | Should Be $true
     ($installerContent -match "Add-Printer failed for") | Should Be $true
     ($installerContent -match "0x000003f0") | Should Be $true
+    ($installerContent -match "function Get-Win32CodeFromException") | Should Be $true
+    ($installerContent -match "function Test-IsNoTokenError") | Should Be $true
+    ($installerContent -match "Test-IsNoTokenError -ErrorRecordOrException") | Should Be $true
+    ($installerContent -match "\$NoTokenWin32ErrorCode = 1008") | Should Be $true
     ($installerContent -match "function Set-DefaultPrinterBestEffort") | Should Be $true
+    ($installerContent -match "Skipping default-printer set due to non-interactive/system context") | Should Be $true
+    ($installerContent -match "Security context: User=") | Should Be $true
     ($installerContent -match "Postcondition: default printer is Name=") | Should Be $true
     ($installerContent -match "NoSetDefaultPrinter") | Should Be $true
   }

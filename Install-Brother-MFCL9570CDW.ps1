@@ -44,6 +44,7 @@ $PendingRetryBaseMinutes = 5
 $PendingRetryMaxBackoffMinutes = 240
 $PendingRetryTtlDays = 7
 $ReachabilityTimeoutMs = 2500
+$NoTokenWin32ErrorCode = 1008
 $TestPageInvokeAttemptsInstall = 1
 $TestPageInvokeAttemptsRetry = 1
 $TestPageObserveSeconds = 20
@@ -83,6 +84,62 @@ function Fail {
 function Test-IsAdmin {
   $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
   return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-Win32CodeFromException {
+  param([Parameter(Mandatory = $true)][System.Exception]$Exception)
+
+  $candidates = @($Exception)
+  if ($Exception.InnerException) { $candidates += $Exception.InnerException }
+  foreach ($candidate in $candidates) {
+    try {
+      $hresult = [uint32]([int]$candidate.HResult)
+      $win32 = [int]($hresult -band 0xFFFF)
+      if ($win32 -gt 0) { return $win32 }
+    }
+    catch {
+      continue
+    }
+  }
+
+  return $null
+}
+
+function Test-IsNoTokenError {
+  param([Parameter(Mandatory = $true)]$ErrorRecordOrException)
+
+  $exception = $null
+  if ($ErrorRecordOrException -is [System.Management.Automation.ErrorRecord]) {
+    $exception = $ErrorRecordOrException.Exception
+  }
+  elseif ($ErrorRecordOrException -is [System.Exception]) {
+    $exception = $ErrorRecordOrException
+  }
+
+  if (-not $exception) { return $false }
+
+  $message = [string]$exception.Message
+  if ($message -match "0x000003f0|token does not exist|ERROR_NO_TOKEN") {
+    return $true
+  }
+
+  $win32Code = Get-Win32CodeFromException -Exception $exception
+  return ($win32Code -eq $NoTokenWin32ErrorCode)
+}
+
+function Get-SecurityContextEvidence {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $sid = if ($identity.User) { $identity.User.Value } else { "<unknown>" }
+  $isSystem = ($sid -eq "S-1-5-18")
+  $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+
+  return [PSCustomObject]@{
+    UserName        = $identity.Name
+    UserSid         = $sid
+    IsSystem        = $isSystem
+    UserInteractive = [Environment]::UserInteractive
+    SessionId       = $sessionId
+  }
 }
 
 function Test-HostAllowed {
@@ -753,7 +810,7 @@ function Ensure-PrinterQueueExists {
     catch {
       $msg = $_.Exception.Message
       Write-Log ("Add-Printer failed for '{0}': {1}" -f $QueueName, $msg) "WARN"
-      if ($msg -match "0x000003f0|token does not exist") {
+      if (Test-IsNoTokenError -ErrorRecordOrException $_) {
         Write-Log "Add-Printer failure appears token-related (0x000003f0). Falling back to printui." "WARN"
       }
     }
@@ -774,6 +831,12 @@ function Set-DefaultPrinterBestEffort {
     return
   }
 
+  $context = Get-SecurityContextEvidence
+  if ($context.IsSystem -or -not $context.UserInteractive) {
+    Write-Log ("Skipping default-printer set due to non-interactive/system context. User='{0}', SID='{1}', IsSystem={2}, UserInteractive={3}, SessionId={4}" -f $context.UserName, $context.UserSid, $context.IsSystem, $context.UserInteractive, $context.SessionId) "WARN"
+    return
+  }
+
   $defaultSet = $false
   try {
     $nameForFilter = $QueueName.Replace("'", "''")
@@ -790,7 +853,7 @@ function Set-DefaultPrinterBestEffort {
   catch {
     $msg = $_.Exception.Message
     Write-Log ("Default printer CIM set failed for '{0}': {1}" -f $QueueName, $msg) "WARN"
-    if ($msg -match "0x000003f0|token does not exist") {
+    if (Test-IsNoTokenError -ErrorRecordOrException $_) {
       Write-Log "Default printer CIM set failure appears token-related (0x000003f0)." "WARN"
     }
   }
@@ -865,6 +928,8 @@ try {
 
   $isAdmin = Test-IsAdmin
   Write-Log ("Admin status: {0}" -f $isAdmin)
+  $contextEvidence = Get-SecurityContextEvidence
+  Write-Log ("Security context: User='{0}', SID='{1}', IsSystem={2}, UserInteractive={3}, SessionId={4}" -f $contextEvidence.UserName, $contextEvidence.UserSid, $contextEvidence.IsSystem, $contextEvidence.UserInteractive, $contextEvidence.SessionId)
   if (-not $isAdmin -and -not $ValidateOnly -and -not $RetryPendingOnly) {
     Write-Log "Not admin. BAT must launch install elevated." "ERROR"
     exit 1
