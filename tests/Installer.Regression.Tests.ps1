@@ -187,6 +187,18 @@ Describe "Brother installer regression tests" {
     ($launcherContent -match "NotifyAlways") | Should Be $true
   }
 
+  It "launcher provides startup printer selection menu with Brother Epson and Custom options" {
+    $launcherContent = Get-Content -Path $launcherPs1 -Raw
+    ($launcherContent -match '\[ValidateSet\("Brother","Epson","Custom"\)\]') | Should Be $true
+    ($launcherContent -match "function Resolve-StartupPrinterSelection") | Should Be $true
+    ($launcherContent -match "Select printer setup option:") | Should Be $true
+    ($launcherContent -match "1\) Brother MFC-L9570CDW \(default\)") | Should Be $true
+    ($launcherContent -match "2\) Epson \(not configured yet\)") | Should Be $true
+    ($launcherContent -match "3\) Custom printer \(URL \+ IP \+ name\)") | Should Be $true
+    ($launcherContent -match "SkipStartupMenu") | Should Be $true
+    ($launcherContent -match "SC_DISABLE_STARTUP_MENU") | Should Be $true
+  }
+
   It "launcher failure notification path uses a single mail-draft channel when SMTP is not configured" {
     $logPath = New-TestLogPath -Prefix "launcher-notify-failure"
     $oldHost = $env:SC_SMTP_HOST

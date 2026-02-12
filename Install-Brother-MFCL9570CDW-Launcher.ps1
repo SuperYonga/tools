@@ -3,6 +3,9 @@ param(
   [string]$PrinterIP,
   [string]$PrinterName,
   [string]$DriverUrl,
+  [ValidateSet("Brother","Epson","Custom")]
+  [string]$PrinterSelection,
+  [switch]$SkipStartupMenu,
   [switch]$ValidateOnly,
   [switch]$SkipSignatureCheck,
   [switch]$NoTestPage,
@@ -16,6 +19,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:FailureCommsTriggered = $false
+$DefaultBrotherIp = "192.168.0.120"
+$DefaultBrotherDriverUrl = "https://download.brother.com/welcome/dlf106550/Y16E_C1-hostm-K1.EXE"
+$IpRegex = '^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installerPs1 = Join-Path $scriptDir "Install-Brother-MFCL9570CDW.ps1"
@@ -332,6 +338,102 @@ function Get-DiagnosticCommsEnabled {
   return $false
 }
 
+function Test-InteractiveSession {
+  if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { return $false }
+  if ($env:SC_DISABLE_STARTUP_MENU -eq "1") { return $false }
+  return $true
+}
+
+function Read-RequiredValue {
+  param(
+    [Parameter(Mandatory = $true)][string]$Prompt,
+    [string]$Pattern,
+    [string]$ValidationMessage = "Value is not valid."
+  )
+
+  while ($true) {
+    $value = Read-Host -Prompt $Prompt
+    if ([string]::IsNullOrWhiteSpace($value)) {
+      Write-Host "Value cannot be empty. Try again."
+      continue
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Pattern) -and -not ($value -match $Pattern)) {
+      Write-Host $ValidationMessage
+      continue
+    }
+    return $value.Trim()
+  }
+}
+
+function Resolve-StartupPrinterSelection {
+  if ($ValidateOnly) {
+    Write-LauncherLog "Startup menu skipped for ValidateOnly mode."
+    return $true
+  }
+
+  if ($SkipStartupMenu) {
+    Write-LauncherLog "Startup menu skipped because -SkipStartupMenu was provided."
+    return $true
+  }
+
+  if (
+    -not [string]::IsNullOrWhiteSpace($script:PrinterIP) -or
+    -not [string]::IsNullOrWhiteSpace($script:PrinterName) -or
+    -not [string]::IsNullOrWhiteSpace($script:DriverUrl) -or
+    -not [string]::IsNullOrWhiteSpace($script:PrinterSelection)
+  ) {
+    Write-LauncherLog "Startup menu skipped because printer parameters were provided."
+    return $true
+  }
+
+  if (-not (Test-InteractiveSession)) {
+    Write-LauncherLog "Startup menu skipped because session is non-interactive."
+    return $true
+  }
+
+  Write-Host ""
+  Write-Host "Select printer setup option:"
+  Write-Host "  1) Brother MFC-L9570CDW (default)"
+  Write-Host "  2) Epson (not configured yet)"
+  Write-Host "  3) Custom printer (URL + IP + name)"
+  Write-Host ""
+
+  $choice = ""
+  while ($choice -notin @("1","2","3")) {
+    $choice = (Read-Host -Prompt "Enter option number (1, 2, or 3)").Trim()
+    if ($choice -notin @("1","2","3")) {
+      Write-Host "Invalid option. Please enter 1, 2, or 3."
+    }
+  }
+
+  switch ($choice) {
+    "1" {
+      $script:PrinterSelection = "Brother"
+      $script:PrinterIP = $DefaultBrotherIp
+      $script:DriverUrl = $DefaultBrotherDriverUrl
+      $script:PrinterName = "Brother MFC-L9570CDW ($script:PrinterIP)"
+      Write-LauncherLog ("Startup menu selection=Brother. Using PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}'." -f $script:PrinterIP, $script:PrinterName, $script:DriverUrl)
+      return $true
+    }
+    "2" {
+      $script:PrinterSelection = "Epson"
+      Write-LauncherLog "Startup menu selection=Epson. Epson installer profile is not configured yet." "ERROR"
+      Write-Host "Epson setup is not configured yet. Please use option 1 or 3."
+      return $false
+    }
+    "3" {
+      $script:PrinterSelection = "Custom"
+      $script:PrinterIP = Read-RequiredValue -Prompt "Enter printer IP address" -Pattern $IpRegex -ValidationMessage "Invalid IPv4 address format. Example: 192.168.0.120"
+      $script:DriverUrl = Read-RequiredValue -Prompt "Enter driver URL (HTTPS)" -Pattern '^https:\/\/.+' -ValidationMessage "Driver URL must start with https://"
+      $script:PrinterName = Read-RequiredValue -Prompt "Enter printer name"
+      Write-LauncherLog ("Startup menu selection=Custom. Using PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}'." -f $script:PrinterIP, $script:PrinterName, $script:DriverUrl)
+      return $true
+    }
+  }
+
+  return $true
+}
+
 function Invoke-SuccessDiagnosticComms {
   param([int]$ExitCode, [string]$Summary)
 
@@ -437,7 +539,12 @@ if (-not (Test-Path $script:LogPath)) { New-Item -ItemType File -Path $script:Lo
 
 Write-LauncherLog "Start launcher."
 Write-LauncherLog ("Installer path: {0}" -f $installerPs1)
-Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NoSetDefaultPrinter={4}, NotifyOnFailure={5}, PrepareOutlookMailOnFailure={6}, NotifyAlways={7}" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NoSetDefaultPrinter, $NotifyOnFailure, $PrepareOutlookMailOnFailure, $NotifyAlways)
+if (-not (Resolve-StartupPrinterSelection)) {
+  Invoke-FailureComms -ExitCode 1 -FailureMessage "Startup menu selection did not produce a runnable printer profile."
+  Write-LauncherLog "Launcher complete."
+  exit 1
+}
+Write-LauncherLog ("Invocation: Elevated={0}, ValidateOnly={1}, SkipSignatureCheck={2}, NoTestPage={3}, NoSetDefaultPrinter={4}, NotifyOnFailure={5}, PrepareOutlookMailOnFailure={6}, NotifyAlways={7}, SkipStartupMenu={8}, PrinterSelection='{9}'" -f $Elevated, $ValidateOnly, $SkipSignatureCheck, $NoTestPage, $NoSetDefaultPrinter, $NotifyOnFailure, $PrepareOutlookMailOnFailure, $NotifyAlways, $SkipStartupMenu, $PrinterSelection)
 Write-LauncherLog ("Parameters: PrinterIP='{0}', PrinterName='{1}', DriverUrl='{2}', LogPath='{3}'" -f $PrinterIP, $PrinterName, $DriverUrl, $script:LogPath)
 Write-LauncherLog ("Failure notification mode: always-on. NotifyTo='{0}'" -f $NotifyTo)
 Write-LauncherLog ("Outlook failure draft mode: always-on (default mode=default-client, fallback=notepad instructions). NotifyTo='{0}'" -f $NotifyTo)
